@@ -10,53 +10,38 @@ PowerShell-based service manager for managing background processes with dependen
 
 ## Installation
 
-### PowerShell Gallery (Recommended)
+### Prerequisites
 
-Install from PowerShell Gallery:
+- **PowerShell 7+**: Required (`winget install Microsoft.PowerShell`)
+- **Windows Terminal**: Recommended for `monit` (`winget install Microsoft.WindowsTerminal`)
+- **sudo for Windows**: Optional for elevated services (`winget install gerardog.gsudo`)
+
+### PowerShell Gallery (Recommended)
 
 ```pwsh
 Install-Module pp2 -Scope CurrentUser
 ```
 
-After installation, `pp2` command is automatically available in PowerShell.
+After installation, `pp2` command is automatically available.
 
-To update:
+To update: `Update-Module pp2`
 
-```pwsh
-Update-Module pp2
-```
-
-To uninstall:
-
-```pwsh
-Uninstall-Module pp2
-```
+To uninstall: `Uninstall-Module pp2`
 
 ### One-Line Install (Alternative)
-
-Run in PowerShell 7:
 
 ```pwsh
 irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex
 ```
 
-For automatic prerequisite installation (PowerShell 7, Windows Terminal, sudo):
-
-```pwsh
-irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex -Args '-InstallPrerequisites'
-```
-
-### What the Installer Does
-
-- ✅ Downloads pp2 from GitHub
-- ✅ Checks prerequisites (PowerShell 7+ required)
-- ✅ Optionally installs missing components via winget
-- ✅ Adds `pp2` alias to your PowerShell profile
-- ✅ Adds `pp2-uninstall` function for easy cleanup
+Installs pp2 from GitHub, checks prerequisites, adds `pp2` alias to profile.
 
 ### Manual Install
 
-If you prefer manual setup:
+```pwsh
+git clone https://github.com/john-walks-slow/pp2.git D:\pp2
+Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
+```
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git D:\pp2
@@ -139,7 +124,7 @@ Create `services.json` in the same directory:
 | `workingDirectory`  | string  | no          | Process working directory                                        |
 | `command`           | string  | **yes**     | Executable path or command                                       |
 | `arguments`         | array   | no          | Command arguments                                                |
-| `shell`             | boolean | no          | ⚠️ **Run mode - critical setting** (default: false)              |
+| `shell`             | boolean | no          | **Run mode - critical** (default: false, see below)              |
 | `ports`             | array   | no          | Service ports (for port health check, empty array disables)      |
 | `ephemeral`         | boolean | no          | Launcher pattern - process exits after starting (default: false) |
 | `autoRestart`       | boolean | no          | Auto-restart on crash (default: false, ignored for ephemeral)    |
@@ -154,9 +139,9 @@ Create `services.json` in the same directory:
 
 ### Shell Mode vs Direct Execution
 
-⚠️ **The `shell` option is critical - incorrect setting may cause services to fail to start!**
+**The `shell` option is critical - incorrect setting may cause services to fail to start!**
 
-The `shell` option controls how commands are executed:
+See the detailed comparison below.
 
 | Mode       | `shell` | Execution Method    | Best For                                     |
 | ---------- | ------- | ------------------- | -------------------------------------------- |

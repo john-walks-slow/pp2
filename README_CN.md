@@ -8,47 +8,33 @@
 
 ## 安装
 
-### PowerShell Gallery（推荐）
+### 前置要求
 
-从 PowerShell Gallery 安装：
+- **PowerShell 7+**: 必需 (`winget install Microsoft.PowerShell`)
+- **Windows Terminal**: 推荐用于 `monit` (`winget install Microsoft.WindowsTerminal`)
+- **sudo for Windows**: 可选，用于提权服务 (`winget install gerardog.gsudo`)
+
+### PowerShell Gallery（推荐）
 
 ```pwsh
 Install-Module pp2 -Scope CurrentUser
 ```
 
-安装后，`pp2` 命令自动在 PowerShell 中可用。
+安装后，`pp2` 命令自动可用。
 
-更新：
+更新：`Update-Module pp2`
 
-```pwsh
-Update-Module pp2
-```
-
-卸载：
-
-```pwsh
-Uninstall-Module pp2
-```
+卸载：`Uninstall-Module pp2`
 
 ### 一行命令安装（备选）
-
-在 PowerShell 7 中运行：
 
 ```pwsh
 irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex
 ```
 
-### 安装脚本功能
-
-- ✅ 从 GitHub 下载 pp2
-- ✅ 检查前置要求（PowerShell 7+ 必需）
-- ✅ 可选通过 winget 安装缺失组件
-- ✅ 将 `pp2` 别名添加到 PowerShell profile
-- ✅ 添加 `pp2-uninstall` 函数用于清理
+从 GitHub 下载 pp2，检查前置要求，添加 `pp2` 别名到 profile。
 
 ### 手动安装
-
-如果你喜欢手动配置：
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git D:\pp2
@@ -131,7 +117,7 @@ pp2 startup-install
 | `workingDirectory`  | string  | no          | 进程工作目录                                    |
 | `command`           | string  | **yes**     | 可执行文件路径或命令                            |
 | `arguments`         | array   | no          | 命令参数                                        |
-| `shell`             | boolean | no          | ⚠️ **运行模式 - 关键设置**（默认：false）         |
+| `shell`             | boolean | no          | **运行模式 - 关键**（默认：false，见下文）      |
 | `ports`             | array   | no          | 服务端口（用于端口健康检查，空数组禁用）        |
 | `ephemeral`         | boolean | no          | 启动器模式 - 进程启动后立即退出（默认：false）  |
 | `autoRestart`       | boolean | no          | 崩溃时自动重启（默认：false，ephemeral 时忽略） |
@@ -145,8 +131,6 @@ pp2 startup-install
 | `legacyProcessName` | string  | no          | 清理遗留进程时需额外清理的进程名                |
 
 ### Shell 模式 vs 直接执行
-
-⚠️ **`shell` 选项是关键设置 - 设置错误可能导致服务无法启动！**
 
 `shell` 选项控制命令的执行方式：
 
