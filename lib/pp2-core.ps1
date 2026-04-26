@@ -13,6 +13,14 @@ function Initialize-Pw2Context {
   $script:Config = Get-Content $script:ConfigPath -Raw | ConvertFrom-Json
 }
 
+function Get-Setting([string]$Name, $Default) {
+  $Settings = $script:Config.settings
+  if (-not $Settings) { return $Default }
+  $Property = $Settings.PSObject.Properties[$Name]
+  if ($Property) { return $Property.Value }
+  return $Default
+}
+
 function Get-ServiceNames([string]$Name = 'all') {
   if ($Name -eq 'all') { return @($Config.services.PSObject.Properties.Name) }
   if (-not $Config.services.PSObject.Properties[$Name]) { throw "Unknown service: $Name" }
@@ -76,7 +84,8 @@ function Get-RecordedProcess([string]$ServiceName) {
   return Get-Process -Id $RecordedPid -ErrorAction SilentlyContinue
 }
 
-function Test-Port([int]$Port, [int]$TimeoutMs = 200) {
+function Test-Port([int]$Port, [int]$TimeoutMs) {
+  if (-not $TimeoutMs) { $TimeoutMs = [int](Get-Setting 'portCheckTimeout' 200) }
   $Client = [System.Net.Sockets.TcpClient]::new()
   try {
     $ConnectTask = $Client.ConnectAsync('127.0.0.1', $Port)
@@ -221,7 +230,8 @@ function Stop-One([string]$ServiceName) {
     Write-Host "executing shutdown command for $ServiceName..."
     Invoke-ShutdownCommand $ServiceName $Service $IsElevated
     Start-Sleep -Seconds 2
-    $Process.WaitForExit(5000)
+    $ShutdownTimeout = [int](Get-Setting 'shutdownTimeout' 5000)
+    $Process.WaitForExit($ShutdownTimeout)
   }
 
   if (Get-Process -Id $Process.Id -ErrorAction SilentlyContinue) {
@@ -250,7 +260,8 @@ function Stop-Watchdog {
   Write-Host "stopped watchdog pid=$WatchPid"
 }
 
-function Start-WatchdogProcess([switch]$ReplaceExisting) {
+function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
+  if (-not $Interval) { $Interval = [int](Get-Setting 'watchdogInterval' 60) }
   $WatchPidPath = Join-Path $RunDir 'watchdog.pid'
   $TempPidPath = Join-Path $RunDir 'watchdog.pid.new'
 
@@ -263,7 +274,7 @@ function Start-WatchdogProcess([switch]$ReplaceExisting) {
     Remove-Item $WatchPidPath -ErrorAction SilentlyContinue
   }
 
-  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root 'lib/pp2-watchdog.ps1')) -WindowStyle Hidden -PassThru
+  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root 'lib/pp2-watchdog.ps1'), '-Interval', $Interval) -WindowStyle Hidden -PassThru
   Set-Content -Path $TempPidPath -Value $Process.Id -NoNewline
   Start-Sleep -Milliseconds 500
 
@@ -325,7 +336,7 @@ function Stop-LegacyOwners([string]$ServiceName, [bool]$Force) {
   }
 }
 
-function Start-One([string]$ServiceName, [bool]$Force) {
+function Start-One([string]$ServiceName, [bool]$Force, [bool]$NoRetryReset = $false) {
   $ProcessOrEphemeral = Get-RecordedProcess $ServiceName
   if ($ProcessOrEphemeral) {
     Write-Host "$ServiceName already running"
@@ -396,15 +407,16 @@ Set-Content -Path $(ConvertTo-PwshLiteral $TempPidFile) -Value `$Process.Id -NoN
   # Ephemeral services: write 'ephemeral' marker instead of PID
   if ($IsEphemeral) {
     Set-Content -Path (Get-PidPath $ServiceName) -Value 'ephemeral' -NoNewline
-    Remove-Item (Get-RetryPath $ServiceName) -ErrorAction SilentlyContinue
+    if (-not $NoRetryReset) { Remove-Item (Get-RetryPath $ServiceName) -ErrorAction SilentlyContinue }
     Write-Host "started $ServiceName (ephemeral mode)"
     return $true
   }
 
   # Normal services: write PID and verify process stays alive
   Set-Content -Path (Get-PidPath $ServiceName) -Value $ActualPid -NoNewline
-  Remove-Item (Get-RetryPath $ServiceName) -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 2.5
+  if (-not $NoRetryReset) { Remove-Item (Get-RetryPath $ServiceName) -ErrorAction SilentlyContinue }
+  $VerifyWaitMs = [int](Get-Setting 'startupVerifyWait' 2500)
+  Start-Sleep -Milliseconds $VerifyWaitMs
 
   if (-not (Get-Process -Id $ActualPid -ErrorAction SilentlyContinue)) {
     Write-Host "WARNING: $ServiceName process (pid=$ActualPid) exited immediately"
@@ -426,14 +438,32 @@ function Show-Status([string]$Name = 'all', [string]$Format = 'table') {
     $Ports = @(Get-ServiceProperty $Service 'ports' @())
     $PortStatus = if ($Ports.Count -eq 0) { '-' } else { ($Ports | ForEach-Object { "$($_):$(if (Test-Port $_) { 'open' } else { 'closed' })" }) -join ', ' }
     $Stats = if ($IsEphemeral) { @{ CPU = '-'; Memory = '-' } } else { Get-ProcessStats $Process }
+    
+    # Calculate uptime from PID file creation time
+    $PidPath = Get-PidPath $ServiceName
+    $Uptime = if ($Process -and (Test-Path $PidPath)) {
+      $PidFileTime = (Get-Item $PidPath).LastWriteTime
+      $Duration = (Get-Date) - $PidFileTime
+      if ($Duration.TotalDays -ge 1) { "{0}d {1}h" -f [int]$Duration.TotalDays, [int]$Duration.Hours }
+      elseif ($Duration.TotalHours -ge 1) { "{0}h {1}m" -f [int]$Duration.TotalHours, [int]$Duration.Minutes }
+      else { "{0}m {1}s" -f [int]$Duration.TotalMinutes, [int]$Duration.Seconds }
+    } else { '-' }
+    
+    # Get retry count
+    $RetryPath = Get-RetryPath $ServiceName
+    $Retries = if (Test-Path $RetryPath) { [int](Get-Content $RetryPath -Raw) } else { 0 }
+    $MaxRetries = [int](Get-ServiceProperty $Service 'maxRetries' 3)
+    $RetryStatus = if ($Retries -gt 0) { "$Retries/$MaxRetries" } else { '-' }
 
     [pscustomobject]@{
       Name = $ServiceName
       Status = if ($IsEphemeral) { 'Running (ephemeral)' } elseif ($Process) { 'Running' } else { 'Stopped' }
       Pid = if ($IsEphemeral) { '-' } elseif ($Process) { $Process.Id } else { '' }
+      Uptime = $Uptime
       CPU = $Stats.CPU
       Memory = $Stats.Memory
       Ports = $PortStatus
+      Retries = $RetryStatus
       AutoRestart = if (Get-ServiceProperty $Service 'autoRestart' $false) { 'yes' } else { 'no' }
       Description = Get-ServiceProperty $Service 'description' ''
     }

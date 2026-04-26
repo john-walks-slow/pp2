@@ -61,6 +61,11 @@ Options:
   -Force                     Skip confirmation prompts for cleanup
 
 Config Fields (services.json):
+  settings.watchdogInterval: 60    Watchdog check interval (seconds)
+  settings.portCheckTimeout: 200   Port check timeout (milliseconds)
+  settings.startupVerifyWait: 2500 Startup verification wait (milliseconds)
+  settings.shutdownTimeout: 5000   Shutdown process exit timeout (milliseconds)
+  
   autoRestart: true          Auto-restart on crash
   maxRetries: 3              Max restart attempts
   dependsOn: ["pp2"]         Dependencies (must start first)
@@ -106,8 +111,9 @@ Examples:
   'watchdog-stop' { Stop-Watchdog }
   'watchdog-status' { Show-WatchdogStatus }
   'internal-start' {
-    # Internal action for watchdog auto-restart (no watchdog restart)
-    foreach ($ServiceName in Get-ServiceNames $Name) { Start-One $ServiceName $Force.IsPresent | Out-Null }
+    # Internal action for watchdog auto-restart (no watchdog restart, no retry reset)
+    # NoRetryReset is always true for internal-start (watchdog manages retry counter)
+    foreach ($ServiceName in Get-ServiceNames $Name) { Start-One $ServiceName $Force.IsPresent -NoRetryReset:$true | Out-Null }
   }
   'startup-install' { Install-StartupTask $PSCommandPath }
   'startup-uninstall' { Uninstall-StartupTask }

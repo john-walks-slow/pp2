@@ -37,7 +37,7 @@ $LogPath = Join-Path $script:LogDir "$Name.out.log"
 $Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
 if ((Get-ServiceProperty $Service 'shell' $false) -eq $true) {
-  # shell 模式：通过 pwsh 执行命令字符串，参数需要适当引号
+  # shell 模式：直接执行命令字符串，参数需要适当引号
   $QuotedArgs = $ServiceArgs | ForEach-Object {
     # 如果参数包含空格、引号或特殊字符，需要用双引号包裹
     if ($_ -match ' |"|''|\&|\|') {
@@ -46,10 +46,11 @@ if ((Get-ServiceProperty $Service 'shell' $false) -eq $true) {
     } else { $_ }
   }
   $FullCommand = "$Command $($QuotedArgs -join ' ')"
-  $ActualCmd = "& pwsh -NoProfile -Command '$FullCommand'"
+  $ActualCmd = $FullCommand
   # 记录实际执行的命令
-  Add-Content -Path $LogPath -Value "[$Timestamp] $ActualCmd"
-  & (Get-PwshPath) -NoProfile -Command $FullCommand
+  Add-Content -Path $LogPath -Value "[$Timestamp] shell: $ActualCmd"
+  # 直接执行命令字符串（不通过嵌套 pwsh）
+  Invoke-Expression $FullCommand
 }
 else {
   # 直接调用：使用数组直接传递

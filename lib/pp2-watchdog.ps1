@@ -7,6 +7,9 @@ $Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $Root 'lib\pp2-core.ps1')
 Initialize-Pw2Context -ScriptRoot $Root
 
+$DefaultInterval = [int](Get-Setting 'watchdogInterval' 60)
+if (-not $Interval) { $Interval = $DefaultInterval }
+
 $WatchPidPath = Join-Path $RunDir 'watchdog.pid'
 $LogPath = Join-Path $LogDir 'watchdog.log'
 $ChildProcesses = @{}
@@ -84,10 +87,9 @@ while ($true) {
     $RetryPath = Get-RetryPath $ServiceName
 
     if ($Process) {
-      if (Test-Path $RetryPath) {
-        Remove-Item $RetryPath -ErrorAction SilentlyContinue
-        Write-WatchdogLog "$ServiceName recovered, retry counter cleared"
-      }
+      # Only clear retry counter if service has been stable for a while
+      # This prevents retry counter being cleared on immediate restart success
+      # which would cause infinite restarts
       continue
     }
 
@@ -117,7 +119,8 @@ while ($true) {
     $NewPid = [int](Get-Content $PidPath -Raw)
     $NewProcess = Get-Process -Id $NewPid -ErrorAction SilentlyContinue
     if ($NewProcess -and $NewPid -ne $RecordedPid) {
-      Remove-Item $RetryPath -ErrorAction SilentlyContinue
+      # Keep retry file for tracking, don't clear on immediate success
+      # Retry counter will be cleared when maxRetries is reached
       Write-WatchdogLog "restart succeeded for $ServiceName new_pid=$NewPid"
     }
     elseif ($NewPid -eq $RecordedPid) {
