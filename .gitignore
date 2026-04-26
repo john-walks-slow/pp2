@@ -1,0 +1,40 @@
+# PID files
+*.pid
+run/
+
+# Logs
+logs/
+*.log
+
+# Test backups
+*.test-backup
+
+# Node modules
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+venv/
+ENV/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and credentials
+.env
+.env.*
+secrets.json
+credentials.json
+.webui_secret_key
