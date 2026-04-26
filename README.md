@@ -43,21 +43,6 @@ git clone https://github.com/john-walks-slow/pp2.git D:\pp2
 Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
 ```
 
-```pwsh
-git clone https://github.com/john-walks-slow/pp2.git D:\pp2
-Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
-```
-
-### Uninstall
-
-```pwsh
-pp2-uninstall
-```
-
-### WinGet (Future)
-
-WinGet package coming soon. For now, use the one-line install script above.
-
 ## Features
 
 - **No Bullshit**: If it can be started via command line, it can be managed by pp2. No weird compatibility issues. Supports environment variable injection and working directory configuration
@@ -139,9 +124,7 @@ Create `services.json` in the same directory:
 
 ### Shell Mode vs Direct Execution
 
-**The `shell` option is critical - incorrect setting may cause services to fail to start!**
-
-See the detailed comparison below.
+The `shell` option controls how commands are executed:
 
 | Mode       | `shell` | Execution Method    | Best For                                     |
 | ---------- | ------- | ------------------- | -------------------------------------------- |

@@ -41,16 +41,6 @@ git clone https://github.com/john-walks-slow/pp2.git D:\pp2
 Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
 ```
 
-### 卸载
-
-```pwsh
-pp2-uninstall
-```
-
-### WinGet（未来）
-
-WinGet 包即将推出。目前请使用上面的一行安装脚本。
-
 ## 功能特性
 
 - **没有 Bullshit**：只要能通过命令行启动，就能通过 pp2 管理，没有奇怪的适配问题。支持环境变量注入和启动目录配置
