@@ -8,6 +8,15 @@ param(
     [int]$Port = 0
 )
 
+# If port mode, start listener first for faster port availability
+if ($Port -gt 0) {
+    $Listener = [System.Net.HttpListener]::new()
+    $Listener.Prefixes.Add("http://127.0.0.1:$Port/")
+    $Listener.Start()
+    Write-Host "Listening on port $Port for 60 seconds..."
+}
+
+# Print diagnostic info after listener starts (for port mode)
 $result = @{
     args = @($TestArg1, $TestArg2, $TestArg3) | Where-Object { $_ }
     env = [Environment]::GetEnvironmentVariables('Process')
@@ -21,13 +30,8 @@ Write-Host ($result | ConvertTo-Json -Depth 1)
 Write-Host "=== TEST SERVICE END ==="
 
 if ($Port -gt 0) {
-    # HTTP listener mode
-    $Listener = [System.Net.HttpListener]::new()
-    $Listener.Prefixes.Add("http://127.0.0.1:$Port/")
-    $Listener.Start()
-    Write-Host "Listening on port $Port for 10 seconds..."
-    
-    $EndTime = (Get-Date).AddSeconds(10)
+    # HTTP listener mode - listener already started above
+    $EndTime = (Get-Date).AddSeconds(60)
     while ($Listener.IsListening -and (Get-Date) -lt $EndTime) {
         $Task = $Listener.GetContextAsync()
         if (-not $Task.Wait(1000)) { continue }

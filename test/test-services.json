@@ -1,4 +1,8 @@
 {
+  "settings": {
+    "watchdogInterval": 1,
+    "portCheckTimeout": 100
+  },
   "services": {
     "test-args-simple": {
       "displayName": "Test Args Simple",

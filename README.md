@@ -2,9 +2,76 @@
 
 > Inspired by [pm2](https://pm2.keymetrics.io/) — the Node.js process manager.
 
+[English](README.md) | [中文](README_CN.md)
+
 PowerShell-based service manager for managing background processes with dependency handling, auto-restart, and monitoring.
 
 **pp2 = PowerShell × pm2**
+
+## Installation
+
+### PowerShell Gallery (Recommended)
+
+Install from PowerShell Gallery:
+
+```pwsh
+Install-Module pp2 -Scope CurrentUser
+```
+
+After installation, `pp2` command is automatically available in PowerShell.
+
+To update:
+
+```pwsh
+Update-Module pp2
+```
+
+To uninstall:
+
+```pwsh
+Uninstall-Module pp2
+```
+
+### One-Line Install (Alternative)
+
+Run in PowerShell 7:
+
+```pwsh
+irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex
+```
+
+For automatic prerequisite installation (PowerShell 7, Windows Terminal, sudo):
+
+```pwsh
+irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex -Args '-InstallPrerequisites'
+```
+
+### What the Installer Does
+
+- ✅ Downloads pp2 from GitHub
+- ✅ Checks prerequisites (PowerShell 7+ required)
+- ✅ Optionally installs missing components via winget
+- ✅ Adds `pp2` alias to your PowerShell profile
+- ✅ Adds `pp2-uninstall` function for easy cleanup
+
+### Manual Install
+
+If you prefer manual setup:
+
+```pwsh
+git clone https://github.com/john-walks-slow/pp2.git D:\pp2
+Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
+```
+
+### Uninstall
+
+```pwsh
+pp2-uninstall
+```
+
+### WinGet (Future)
+
+WinGet package coming soon. For now, use the one-line install script above.
 
 ## Features
 
@@ -65,29 +132,66 @@ Create `services.json` in the same directory:
 
 ### Configuration Fields
 
-| Field               | Type    | Required | Description                                                 |
-| ------------------- | ------- | -------- | ----------------------------------------------------------- |
-| `displayName`       | string  | no       | Display name                                                |
-| `description`       | string  | no       | Service description                                         |
-| `workingDirectory`  | string  | no       | Process working directory                                   |
-| `command`           | string  | **yes**  | Executable path or command                                  |
-| `arguments`         | array   | no       | Command arguments                                           |
-| `ports`             | array   | no       | Service ports (for port health check, empty array disables) |
-| `ephemeral`         | boolean | no       | Launcher pattern - process exits after starting (default: false) |
-| `autoRestart`       | boolean | no       | Auto-restart on crash (default: false, ignored for ephemeral) |
-| `maxRetries`        | number  | no       | Max restart attempts (default: 3)                           |
-| `dependsOn`         | array   | no       | Dependent services (affects startup order)                  |
-| `elevated`          | boolean | no       | Elevate via sudo                                            |
-| `env`               | object  | no       | Environment variables to inject                             |
-| `inheritEnv`        | boolean | no       | Inherit system environment variables (default: true)        |
-| `shell`             | boolean | no       | Run via pwsh (default: true)                                |
-| `shutdownCommand`   | string  | conditional | Custom shutdown command (**required** for ephemeral)     |
-| `shutdownArguments` | array   | no       | Arguments for shutdownCommand                               |
-| `legacyProcessName` | string  | no       | Additional process name to clean up legacy processes        |
+| Field               | Type    | Required    | Description                                                      |
+| ------------------- | ------- | ----------- | ---------------------------------------------------------------- |
+| `displayName`       | string  | no          | Display name                                                     |
+| `description`       | string  | no          | Service description                                              |
+| `workingDirectory`  | string  | no          | Process working directory                                        |
+| `command`           | string  | **yes**     | Executable path or command                                       |
+| `arguments`         | array   | no          | Command arguments                                                |
+| `shell`             | boolean | no          | ⚠️ **Run mode - critical setting** (default: false)              |
+| `ports`             | array   | no          | Service ports (for port health check, empty array disables)      |
+| `ephemeral`         | boolean | no          | Launcher pattern - process exits after starting (default: false) |
+| `autoRestart`       | boolean | no          | Auto-restart on crash (default: false, ignored for ephemeral)    |
+| `maxRetries`        | number  | no          | Max restart attempts (default: 3)                                |
+| `dependsOn`         | array   | no          | Dependent services (affects startup order)                       |
+| `elevated`          | boolean | no          | Elevate via sudo                                                 |
+| `env`               | object  | no          | Environment variables to inject                                  |
+| `inheritEnv`        | boolean | no          | Inherit system environment variables (default: true)             |
+| `shutdownCommand`   | string  | conditional | Custom shutdown command (**required** for ephemeral)             |
+| `shutdownArguments` | array   | no          | Arguments for shutdownCommand                                    |
+| `legacyProcessName` | string  | no          | Additional process name to clean up legacy processes             |
+
+### Shell Mode vs Direct Execution
+
+⚠️ **The `shell` option is critical - incorrect setting may cause services to fail to start!**
+
+The `shell` option controls how commands are executed:
+
+| Mode       | `shell` | Execution Method    | Best For                                     |
+| ---------- | ------- | ------------------- | -------------------------------------------- |
+| **Direct** | `false` | `& $command $args`  | Native executables, precise argument passing |
+| **Shell**  | `true`  | `Invoke-Expression` | CLI tools (npx, uvx), shell features needed  |
+
+**Direct mode (`shell: false`)** - Default:
+
+- Arguments passed as separate tokens, preserving boundaries
+- No shell interpretation (no pipes, redirects, wildcards)
+- Example: `["--port", "8080"]` → two exact arguments
+
+**Shell mode (`shell: true`)**:
+
+- Command executed as a string via PowerShell shell
+- Enables shell features: PATH resolution, pipes, redirects
+- Arguments are properly quoted/escaped for shell
+- Example: `npx my-package` → resolves via PATH, executes in shell
+
+**When to use `shell: true`:**
+
+- `npx`, `uvx`, `pipx` and other package runners (need PATH resolution)
+- Commands requiring shell features (`node script.js | tee log.txt`)
+- Commands with special characters that need shell interpretation
+
+**When to use `shell: false`:**
+
+- Direct executable paths (`C:/path/to/service.exe`)
+- When you need exact argument boundaries
+- When arguments contain spaces (no shell quoting issues)
 
 ### Ephemeral Services (Launcher Pattern)
 
 Some services are **launcher scripts** that start other processes and then exit immediately. For example:
+
 - A wrapper script that launches a background daemon (`nohup my-daemon &`)
 - A CLI tool that starts a service and exits (like `cloudflared tunnel run` in certain modes)
 - A process manager script that spawns child processes
@@ -110,14 +214,38 @@ For these cases, use `ephemeral: true`:
 ```
 
 **Behavior:**
+
 - PID file contains `'ephemeral'` marker instead of real PID
 - Watchdog **skips process monitoring** (no auto-restart)
 - `pp2 stop` calls `shutdownCommand` to clean up spawned processes
 - Status shows `Running (ephemeral)` with PID = `-`
 
 **Requirements:**
+
 - `shutdownCommand` is **mandatory** for ephemeral services
 - `autoRestart` is automatically disabled (cannot monitor ephemeral processes)
+
+### Global Settings
+
+Configure in `services.json` under `settings`:
+
+```json
+{
+  "settings": {
+    "watchdogInterval": 60,
+    "portCheckTimeout": 200,
+    "startupVerifyWait": 2500,
+    "shutdownTimeout": 5000
+  }
+}
+```
+
+| Field               | Type   | Default | Description                                  |
+| ------------------- | ------ | ------- | -------------------------------------------- |
+| `watchdogInterval`  | number | 60      | Watchdog check interval (seconds)            |
+| `portCheckTimeout`  | number | 200     | Port check timeout (milliseconds)            |
+| `startupVerifyWait` | number | 2500    | Startup verification wait (milliseconds)     |
+| `shutdownTimeout`   | number | 5000    | Shutdown process exit timeout (milliseconds) |
 
 ## Commands Reference
 

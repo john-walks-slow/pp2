@@ -423,9 +423,9 @@ try {
   # NPX HTTP Server
   Write-Host "Testing real NPX http-server..."
   Start-TestService 'test-real-npx-http'
-  Start-Sleep -Seconds 10  # NPX needs time to download/package
-  $PortUp = Test-PortListening 19980 3000
-  $Msg = if ($PortUp) { "NPX http-server on 19980 works" } else { "Port not listening" }
+  Start-Sleep -Seconds 25  # NPX needs more time to download/package on first run
+  $PortUp = Test-PortListening 19980 5000
+  $Msg = if ($PortUp) { "NPX http-server on 19980 works" } else { "Port not listening (may need cache)" }
   Write-Result 'real-npx-http' $PortUp $Msg
   Stop-TestService 'test-real-npx-http'
   
