@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "watchdogInterval": 60,
+    "portCheckTimeout": 200,
+    "startupVerifyWait": 2500,
+    "shutdownTimeout": 5000
+  },
+  "services": {
+    "example": {
+      "displayName": "Example Service",
+      "description": "An example service configuration",
+      "command": "pwsh",
+      "arguments": ["-NoProfile", "-Command", "Write-Host 'Hello from pp2'"],
+      "ports": [],
+      "shell": false,
+      "autoRestart": false,
+      "maxRetries": 3
+    }
+  }
+}

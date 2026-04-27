@@ -7,7 +7,7 @@
     "test-args-simple": {
       "displayName": "Test Args Simple",
       "description": "Test simple argument passing",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -24,7 +24,7 @@
     "test-args-quoted": {
       "displayName": "Test Args Quoted",
       "description": "Test argument with spaces and special chars",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -43,7 +43,7 @@
     "test-args-shell": {
       "displayName": "Test Args Shell Mode",
       "description": "Test shell mode argument passing",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -60,7 +60,7 @@
     "test-args-empty": {
       "displayName": "Test Args Empty",
       "description": "Test with empty arguments array",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": ["-NoProfile", "-File", "test-echo-service.ps1"],
       "ports": [],
@@ -69,7 +69,7 @@
     "test-args-python": {
       "displayName": "Test Args Python",
       "description": "Test Python script argument passing",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "python",
       "arguments": [
         "test-echo-service.py",
@@ -83,7 +83,7 @@
     "test-env": {
       "displayName": "Test Environment",
       "description": "Test environment variable passing",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": ["-NoProfile", "-File", "test-echo-service.ps1"],
       "env": {
@@ -97,7 +97,7 @@
     "test-env-inherit-false": {
       "displayName": "Test No Inherit Env",
       "description": "Test inheritEnv=false - only specified env vars",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": ["-NoProfile", "-File", "test-echo-service.ps1"],
       "env": {
@@ -119,7 +119,7 @@
     "test-crash-auto-restart": {
       "displayName": "Test Auto Restart",
       "description": "Test autoRestart on crash - should restart 3 times",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -136,7 +136,7 @@
     "test-crash-no-restart": {
       "displayName": "Test No Auto Restart",
       "description": "Test autoRestart=false - should not restart",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -152,7 +152,7 @@
     "test-immediate-stop": {
       "displayName": "Test Immediate Stop",
       "description": "Test that stop command detects process exit",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -167,7 +167,7 @@
     "test-bat-launcher": {
       "displayName": "Test BAT Launcher",
       "description": "Test .bat file as command",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "./test-simple.bat",
       "arguments": ["arg1", "arg2"],
       "ports": [],
@@ -176,7 +176,7 @@
     "test-exe-launcher": {
       "displayName": "Test EXE Launcher",
       "description": "Test .exe file as command",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh.exe",
       "arguments": [
         "-NoProfile",
@@ -191,7 +191,7 @@
     "test-npx-launcher": {
       "displayName": "Test NPX Launcher",
       "description": "Test npx as launcher with args",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "npx",
       "arguments": ["-y", "cowsay", "hello from npx"],
       "ports": [],
@@ -200,7 +200,7 @@
     "test-uvx-launcher": {
       "displayName": "Test UVX Launcher",
       "description": "Test uvx as launcher",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "uvx",
       "arguments": [
         "--from",
@@ -215,7 +215,7 @@
     "test-port-service": {
       "displayName": "Test Port Detection",
       "description": "Test port-based service status detection",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -230,7 +230,7 @@
     "test-ephemeral": {
       "displayName": "Test Ephemeral Launcher",
       "description": "Test ephemeral service pattern - launcher exits after starting background process",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -252,7 +252,7 @@
     "test-args-json": {
       "displayName": "Test JSON Args",
       "description": "Test JSON-like argument passing",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -269,7 +269,7 @@
     "test-args-url": {
       "displayName": "Test URL Args",
       "description": "Test URL and query string arguments",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -286,7 +286,7 @@
     "test-args-backslash": {
       "displayName": "Test Backslash Args",
       "description": "Test paths with backslashes",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -303,7 +303,7 @@
     "test-args-unicode": {
       "displayName": "Test Unicode Args",
       "description": "Test Unicode/Chinese characters",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "pwsh",
       "arguments": [
         "-NoProfile",
@@ -320,7 +320,7 @@
     "test-real-npx-http": {
       "displayName": "Real NPX HTTP Server",
       "description": "Real-world: npx http-server for static files",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "npx",
       "arguments": ["-y", "http-server", "-p", "19980", "--force"],
       "ports": [19980],
@@ -329,7 +329,7 @@
     "test-real-node-http": {
       "displayName": "Real Node.js HTTP",
       "description": "Real-world: Node.js built-in HTTP server",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "node",
       "arguments": ["test-node-server.js"],
       "ports": [19981],
@@ -338,7 +338,7 @@
     "test-real-python-http": {
       "displayName": "Real Python HTTP",
       "description": "Real-world: Python built-in HTTP server",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "python",
       "arguments": ["-m", "http.server", "19982"],
       "ports": [19982],
@@ -347,7 +347,7 @@
     "test-real-deno-http": {
       "displayName": "Real Deno HTTP",
       "description": "Real-world: Deno HTTP server",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "deno",
       "arguments": ["run", "--allow-net", "test-deno-server.ts"],
       "ports": [19983],
@@ -356,7 +356,7 @@
     "test-real-uvx-rich": {
       "displayName": "Real UVX Rich",
       "description": "Real-world: uvx with rich package",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "uvx",
       "arguments": [
         "--from",
@@ -371,7 +371,7 @@
     "test-real-python-uvicorn": {
       "displayName": "Real Python Uvicorn",
       "description": "Real-world: uvicorn ASGI server",
-      "workingDirectory": "D:/Services/test",
+      "workingDirectory": "{{TEST_DIR}}",
       "command": "uvx",
       "arguments": [
         "uvicorn",

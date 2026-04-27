@@ -1,10 +1,12 @@
 # PID files
 *.pid
 run/
+module/pp2/run/
 
 # Logs
 logs/
 *.log
+module/pp2/logs/
 
 # Test backups
 *.test-backup

@@ -22,25 +22,31 @@ PowerShell-based service manager for managing background processes with dependen
 Install-Module pp2 -Scope CurrentUser
 ```
 
-After installation, `pp2` command is automatically available.
-
 To update: `Update-Module pp2`
 
 To uninstall: `Uninstall-Module pp2`
 
-### One-Line Install (Alternative)
+### GitHub Install (Alternative)
 
 ```pwsh
-irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex
+git clone https://github.com/john-walks-slow/pp2.git
+cd pp2
+.\pp2.ps1 status
 ```
 
-Installs pp2 from GitHub, checks prerequisites, adds `pp2` alias to profile.
+## Project Structure
 
-### Manual Install
-
-```pwsh
-git clone https://github.com/john-walks-slow/pp2.git D:\pp2
-Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
+```
+pp2/
+├── pp2.ps1              # CLI entry point
+├── module/pp2/          # PowerShell Gallery module
+│   ├── pp2.psm1         # Core implementation
+│   ├── pp2.psd1         # Module manifest
+│   ├── lib/             # Library functions
+│   └── services.json    # Configuration
+├── install.ps1           # Installation script
+├── winget/              # Winget manifest
+└── test/                # Tests
 ```
 
 ## Features

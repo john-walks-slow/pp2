@@ -15,7 +15,8 @@ Tests:
 
 param(
   [switch]$Quick,  # Skip long-running tests
-  [switch]$Verbose
+  [switch]$Verbose,
+  [string]$Config  # Path to config file (default: test-services.json in test dir)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,21 @@ $Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $TestDir = Join-Path $Root 'test'
 $Results = @{}
 $FailedTests = @()
+
+function Get-TestConfigPath {
+  if ($Config) {
+    if (Test-Path $Config) { return $Config }
+    throw "Config file not found: $Config"
+  }
+  return Join-Path $TestDir 'test-services.json'
+}
+
+function Set-TestConfigDynamic {
+  param([string]$SourceConfig, [string]$TargetConfig)
+  $Content = Get-Content $SourceConfig -Raw
+  $DynamicContent = $Content -replace '{{TEST_DIR}}', $TestDir
+  $DynamicContent | Set-Content $TargetConfig -NoNewline
+}
 
 function Write-Header([string]$Title) {
   Write-Host "`n=== $Title ===" -ForegroundColor Cyan
@@ -90,13 +106,15 @@ function Cleanup-AllTestServices {
 Write-Header "PP2 Integration Tests"
 Write-Host "Testing: args, env, cwd, launchers, auto-restart, immediate stop"
 
-# Backup and use test config
+# Backup and use test config (generated dynamically with correct paths)
 $OriginalConfig = Join-Path $Root 'services.json'
 $BackupConfig = Join-Path $Root 'services.json.test-backup'
 if (Test-Path $OriginalConfig) {
   Copy-Item $OriginalConfig $BackupConfig -Force
 }
-Copy-Item (Join-Path $TestDir 'test-services.json') $OriginalConfig -Force
+$SourceConfig = Get-TestConfigPath
+Set-TestConfigDynamic -SourceConfig $SourceConfig -TargetConfig $OriginalConfig
+Write-Host "Using config: $OriginalConfig" -ForegroundColor Gray
 
 try {
   # ===== TEST 1: Argument Passing =====

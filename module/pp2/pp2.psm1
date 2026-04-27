@@ -24,11 +24,11 @@
     https://github.com/your-username/services
 #>
 
-$script:Pp2Root = $PSScriptRoot
+$script:Pp2Root = Split-Path -Parent $PSScriptRoot
 $script:ConfigPath = Join-Path $script:Pp2Root 'services.json'
 
 # Import helper functions
-. (Join-Path $script:Pp2Root 'lib\pp2-core.ps1')
+. (Join-Path $PSScriptRoot 'lib\pp2-core.ps1')
 
 function pp2 {
     <#
