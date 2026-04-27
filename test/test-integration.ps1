@@ -36,7 +36,8 @@ function Get-TestConfigPath {
 function Set-TestConfigDynamic {
   param([string]$SourceConfig, [string]$TargetConfig)
   $Content = Get-Content $SourceConfig -Raw
-  $DynamicContent = $Content -replace '{{TEST_DIR}}', $TestDir
+  $EscapedTestDir = $TestDir.Replace('\', '\\')
+  $DynamicContent = $Content -replace '{{TEST_DIR}}', $EscapedTestDir
   $DynamicContent | Set-Content $TargetConfig -NoNewline
 }
 

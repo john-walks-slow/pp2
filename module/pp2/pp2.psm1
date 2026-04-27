@@ -24,7 +24,16 @@
     https://github.com/your-username/services
 #>
 
-$script:Pp2Root = Split-Path -Parent $PSScriptRoot
+$script:SourceCheckoutRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$script:Pp2Root = if ($env:PP2_HOME) {
+    $env:PP2_HOME
+}
+elseif (Test-Path (Join-Path $script:SourceCheckoutRoot 'pp2.ps1')) {
+    $script:SourceCheckoutRoot
+}
+else {
+    Join-Path $HOME '.pp2'
+}
 $script:ConfigPath = Join-Path $script:Pp2Root 'services.json'
 
 # Import helper functions
@@ -45,7 +54,7 @@ function pp2 {
     #>
     param(
         [Parameter(Position = 0)]
-        [ValidateSet('status', 'start', 'stop', 'restart', 'logs', 'monit', 'list', 
+        [ValidateSet('status', 'start', 'stop', 'restart', 'logs', 'monit', 'list', 'internal-start',
                      'watchdog-start', 'watchdog-stop', 'watchdog-status',
                      'startup-install', 'startup-uninstall', 'help')]
         [string]$Action = 'status',
@@ -121,6 +130,11 @@ Examples:
                 Start-One $ServiceName $Force.IsPresent | Out-Null 
             }
         }
+        'internal-start' {
+            foreach ($ServiceName in Get-ServiceNames $Name) {
+                Start-One $ServiceName $true | Out-Null
+            }
+        }
         'stop' { Stop-Many (Get-ServiceNames $Name) }
         'restart' {
             $ServicesToRestart = Get-ServiceNames $Name
@@ -140,7 +154,7 @@ Examples:
         'watchdog-start' { Start-WatchdogProcess }
         'watchdog-stop' { Stop-Watchdog }
         'watchdog-status' { Show-WatchdogStatus }
-        'startup-install' { Install-StartupTask (Join-Path $script:Pp2Root 'pp2.ps1') }
+        'startup-install' { Install-StartupTask (Join-Path $PSScriptRoot 'pp2.psd1') $script:Pp2Root }
         'startup-uninstall' { Uninstall-StartupTask }
     }
 }

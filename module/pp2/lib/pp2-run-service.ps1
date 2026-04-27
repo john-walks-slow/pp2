@@ -1,11 +1,12 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$Name
+  [string]$Name,
+  [Parameter(Mandatory = $true)]
+  [string]$Root
 )
 
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-. (Join-Path $Root 'lib\pp2-core.ps1')
+. (Join-Path (Split-Path -Parent $PSCommandPath) 'pp2-core.ps1')
 Initialize-Pw2Context -ScriptRoot $Root
 $Service = Get-ServiceConfig $Name
 

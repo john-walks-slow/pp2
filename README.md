@@ -16,7 +16,7 @@ PowerShell-based service manager for managing background processes with dependen
 - **Windows Terminal**: Recommended for `monit` (`winget install Microsoft.WindowsTerminal`)
 - **sudo for Windows**: Optional for elevated services (`winget install gerardog.gsudo`)
 
-### PowerShell Gallery (Recommended)
+### PowerShell Gallery
 
 ```pwsh
 Install-Module pp2 -Scope CurrentUser
@@ -26,7 +26,9 @@ To update: `Update-Module pp2`
 
 To uninstall: `Uninstall-Module pp2`
 
-### GitHub Install (Alternative)
+### Source Checkout
+
+Use this only for development or testing without installing the module:
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
@@ -38,14 +40,12 @@ cd pp2
 
 ```
 pp2/
-├── pp2.ps1              # CLI entry point
+├── pp2.ps1              # Source checkout shim
 ├── module/pp2/          # PowerShell Gallery module
 │   ├── pp2.psm1         # Core implementation
 │   ├── pp2.psd1         # Module manifest
 │   ├── lib/             # Library functions
 │   └── services.json    # Configuration
-├── install.ps1           # Installation script
-├── winget/              # Winget manifest
 └── test/                # Tests
 ```
 
@@ -79,7 +79,7 @@ pp2 startup-install
 
 ## Configuration
 
-Create `services.json` in the same directory:
+Create `services.json` in the directory where you run `pp2`. For a source checkout, copy `module/pp2/services.example.json` to `services.json` in the repo root:
 
 ```json
 {
@@ -288,12 +288,12 @@ Services with `dependsOn` start in correct order. Stop operations use reverse de
 
 ## Log Management
 
-Logs stored in `logs/` directory:
+Logs are stored next to `services.json` in the `logs/` directory:
 
 - `logs/<service>.out.log` - Standard output
 - `logs/<service>.err.log` - Standard error
 
-PID tracking in `run/` directory:
+PID tracking is stored next to `services.json` in the `run/` directory:
 
 - `run/<service>.pid` - Process ID
 - `run/<service>.elevated` - Elevated service marker

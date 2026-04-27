@@ -14,7 +14,7 @@
 - **Windows Terminal**: 推荐用于 `monit` (`winget install Microsoft.WindowsTerminal`)
 - **sudo for Windows**: 可选，用于提权服务 (`winget install gerardog.gsudo`)
 
-### PowerShell Gallery（推荐）
+### PowerShell Gallery
 
 ```pwsh
 Install-Module pp2 -Scope CurrentUser
@@ -26,19 +26,14 @@ Install-Module pp2 -Scope CurrentUser
 
 卸载：`Uninstall-Module pp2`
 
-### 一行命令安装（备选）
+### 源码运行
+
+仅用于开发或不安装模块时的测试：
 
 ```pwsh
-irm https://raw.githubusercontent.com/john-walks-slow/pp2/main/install.ps1 | iex
-```
-
-从 GitHub 下载 pp2，检查前置要求，添加 `pp2` 别名到 profile。
-
-### 手动安装
-
-```pwsh
-git clone https://github.com/john-walks-slow/pp2.git D:\pp2
-Add-Content $PROFILE "Set-Alias pp2 'D:\pp2\pp2.ps1'"
+git clone https://github.com/john-walks-slow/pp2.git
+cd pp2
+.\pp2.ps1 status
 ```
 
 ## 功能特性
@@ -71,7 +66,7 @@ pp2 startup-install
 
 ## 配置说明
 
-在同目录创建 `services.json`：
+在运行 `pp2` 的目录创建 `services.json`。源码运行时，将 `module/pp2/services.example.json` 复制为仓库根目录的 `services.json`：
 
 ```json
 {
@@ -280,12 +275,12 @@ pp2 startup-uninstall          # 从 Windows 启动移除
 
 ## 日志管理
 
-日志存储在 `logs/` 目录：
+日志存储在 `services.json` 同目录下的 `logs/` 目录：
 
 - `logs/<service>.out.log` - 标准输出
 - `logs/<service>.err.log` - 标准错误
 
-PID 跟踪在 `run/` 目录：
+PID 跟踪在 `services.json` 同目录下的 `run/` 目录：
 
 - `run/<service>.pid` - 进程 ID
 - `run/<service>.elevated` - 提权服务标记

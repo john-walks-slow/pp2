@@ -4,6 +4,7 @@ function Initialize-Pw2Context {
   param([Parameter(Mandatory = $true)][string]$ScriptRoot)
 
   $script:Root = $ScriptRoot
+  $script:ModuleRoot = Split-Path -Parent $PSScriptRoot
   $script:ConfigPath = Join-Path $script:Root 'services.json'
   $script:RunDir = Join-Path $script:Root 'run'
   $script:LogDir = Join-Path $script:Root 'logs'
@@ -274,7 +275,7 @@ function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
     Remove-Item $WatchPidPath -ErrorAction SilentlyContinue
   }
 
-  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root 'lib/pp2-watchdog.ps1'), '-Interval', $Interval) -WindowStyle Hidden -PassThru
+  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ModuleRoot 'lib/pp2-watchdog.ps1'), '-Interval', $Interval, '-Root', $Root) -WindowStyle Hidden -PassThru
   Set-Content -Path $TempPidPath -Value $Process.Id -NoNewline
   Start-Sleep -Milliseconds 500
 
@@ -359,7 +360,7 @@ function Start-One([string]$ServiceName, [bool]$Force, [bool]$NoRetryReset = $fa
 
   Stop-LegacyOwners $ServiceName $Force
 
-  $StartArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Root 'lib/pp2-run-service.ps1'), '-Name', $ServiceName)
+  $StartArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ModuleRoot 'lib/pp2-run-service.ps1'), '-Name', $ServiceName, '-Root', $Root)
   $OutLog = Get-OutLog $ServiceName
   $ErrLog = Get-ErrLog $ServiceName
   $ActualPid = $null
@@ -547,8 +548,9 @@ function Show-WatchdogStatus {
   else { Write-Host 'watchdog not running (stale PID file)' }
 }
 
-function Install-StartupTask([string]$EntryScriptPath) {
-  $ActionDef = New-ScheduledTaskAction -Execute (Get-PwshPath) -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$EntryScriptPath`" start all"
+function Install-StartupTask([string]$ModuleManifestPath, [string]$StateRoot) {
+  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $StateRoot); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 start all }"
+  $ActionDef = New-ScheduledTaskAction -Execute (Get-PwshPath) -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$Command`""
   $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
   Register-ScheduledTask -TaskName $TaskName -Action $ActionDef -Trigger $Trigger -Principal $Principal -Force | Out-Null

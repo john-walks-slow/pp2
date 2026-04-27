@@ -1,10 +1,11 @@
 param(
-  [int]$Interval = 60
+  [int]$Interval = 60,
+  [Parameter(Mandatory = $true)]
+  [string]$Root
 )
 
 $ErrorActionPreference = 'Continue'
-$Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-. (Join-Path $Root 'lib\pp2-core.ps1')
+. (Join-Path (Split-Path -Parent $PSCommandPath) 'pp2-core.ps1')
 Initialize-Pw2Context -ScriptRoot $Root
 
 $DefaultInterval = [int](Get-Setting 'watchdogInterval' 60)
@@ -19,8 +20,9 @@ function Write-WatchdogLog([string]$Message) {
 }
 
 function Invoke-ServiceRestart([string]$ServiceName) {
-  $Pw2Path = Join-Path $Root 'pp2.ps1'
-  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Pw2Path, 'internal-start', $ServiceName) -PassThru -WindowStyle Hidden
+  $ModuleManifestPath = Join-Path $ModuleRoot 'pp2.psd1'
+  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $Root); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 internal-start $(ConvertTo-PwshLiteral $ServiceName) }"
+  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $Command) -PassThru -WindowStyle Hidden
   $ChildProcesses[$Process.Id] = $ServiceName
 
   Start-Sleep -Seconds 3
