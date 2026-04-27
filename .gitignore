@@ -34,6 +34,10 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# NuGet packages
+*.nupkg
+module/pp2/_publish/
+
 # Secrets and credentials
 .env
 .env.*
@@ -43,3 +47,4 @@ credentials.json
 
 # Service configuration (local)
 services.json
+module/pp2/services.json
