@@ -13,8 +13,8 @@ PowerShell-based service manager for managing background processes with dependen
 ### Prerequisites
 
 - **PowerShell 7+**: Required (`winget install Microsoft.PowerShell`)
-- **Windows Terminal**: Recommended for `monit` (`winget install Microsoft.WindowsTerminal`)
-- **sudo for Windows**: Optional for elevated services (`winget install gerardog.gsudo`)
+- **Windows Terminal**: Optional for `monit` (`winget install Microsoft.WindowsTerminal`)
+- **sudo for Windows**: Optional for `elevated` option (`winget install gerardog.gsudo`)
 
 ### PowerShell Gallery
 
@@ -22,41 +22,21 @@ PowerShell-based service manager for managing background processes with dependen
 Install-Module pp2 -Scope CurrentUser
 ```
 
+The `pp2` command is available after installation.
+
 To update: `Update-Module pp2`
 
 To uninstall: `Uninstall-Module pp2`
 
 ### Source Checkout
 
-Use this only for development or testing without installing the module:
+For development/testing only:
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
 cd pp2
 .\pp2.ps1 status
 ```
-
-## Project Structure
-
-```
-pp2/
-├── pp2.ps1              # Source checkout shim
-├── module/pp2/          # PowerShell Gallery module
-│   ├── pp2.psm1         # Core implementation
-│   ├── pp2.psd1         # Module manifest
-│   ├── lib/             # Library functions
-│   └── services.json    # Configuration
-└── test/                # Tests
-```
-
-## Features
-
-- **No Bullshit**: If it can be started via command line, it can be managed by pp2. No weird compatibility issues. Supports environment variable injection and working directory configuration
-- **Auto-Restart**: Watchdog monitoring, automatically restarts crashed services
-- **Log Viewing**: Centralized log management, supports Windows Terminal split-pane monitoring
-- **Port Checking**: Check port health, handle port conflicts
-- **Windows Startup Integration**: Set services to auto-start on user login
-- **Privilege Elevation**: Supports Sudo for Windows to elevate service privileges
 
 ## Quick Start
 
@@ -67,8 +47,11 @@ pp2 status
 # Start all services
 pp2 start all
 
-# Stop all services
-pp2 stop all
+# Stop service
+pp2 stop my-service
+
+# View logs
+pp2 logs my-service
 
 # Multi-pane log monitoring (requires Windows Terminal)
 pp2 monit
@@ -77,30 +60,26 @@ pp2 monit
 pp2 startup-install
 ```
 
-## Configuration
+## Configuration Example
 
 Define services in `services.json` under the pp2 config directory. (Default: `$HOME/.pp2`, override with `PP2_HOME`)
 
 ```json
 {
   "services": {
-    "my-service": {
-      "displayName": "My Service",
-      "description": "Description shown in status",
-      "workingDirectory": "C:/path/to/workdir",
-      "command": "C:/path/to/executable.exe",
-      "arguments": ["--port", "8080"],
-      "ports": [8080],
-      "autoRestart": true,
-      "maxRetries": 3,
-      "dependsOn": ["another-service"],
-      "elevated": false,
+    "http-server": {
+      "displayName": "Simple Http Server",
+      "description": "a simple http server",
+      "workingDirectory": "D:/path/to/website",
+      "command": "npx",
+      "arguments": ["-y", "http-server"],
+      "shell": true,
       "env": {
-        "ENV_VAR": "value"
+        "PORT": 1234
       },
-      "shell": false,
-      "shutdownCommand": "C:/path/to/shutdown.exe",
-      "shutdownArguments": ["--stop"]
+      "ports": [1234],
+      "autoRestart": true,
+      "maxRetries": 3
     }
   }
 }
@@ -108,67 +87,54 @@ Define services in `services.json` under the pp2 config directory. (Default: `$H
 
 ### Configuration Fields
 
-| Field               | Type    | Required    | Description                                                      |
-| ------------------- | ------- | ----------- | ---------------------------------------------------------------- |
-| `displayName`       | string  | no          | Display name                                                     |
-| `description`       | string  | no          | Service description                                              |
-| `workingDirectory`  | string  | no          | Process working directory                                        |
-| `command`           | string  | **yes**     | Executable path or command                                       |
-| `arguments`         | array   | no          | Command arguments                                                |
-| `shell`             | boolean | no          | **Run mode - critical** (default: false, see below)              |
-| `ports`             | array   | no          | Service ports (for port health check, empty array disables)      |
-| `ephemeral`         | boolean | no          | Launcher pattern - process exits after starting (default: false) |
-| `autoRestart`       | boolean | no          | Auto-restart on crash (default: false, ignored for ephemeral)    |
-| `maxRetries`        | number  | no          | Max restart attempts (default: 3)                                |
-| `dependsOn`         | array   | no          | Dependent services (affects startup order)                       |
-| `elevated`          | boolean | no          | Elevate via sudo                                                 |
-| `env`               | object  | no          | Environment variables to inject                                  |
-| `inheritEnv`        | boolean | no          | Inherit system environment variables (default: true)             |
-| `shutdownCommand`   | string  | conditional | Custom shutdown command (**required** for ephemeral)             |
-| `shutdownArguments` | array   | no          | Arguments for shutdownCommand                                    |
-| `legacyProcessName` | string  | no          | Additional process name to clean up legacy processes             |
+| Field               | Type    | Required    | Description                                            |
+| ------------------- | ------- | ----------- | ------------------------------------------------------ |
+| `displayName`       | string  | no          | Display name                                           |
+| `description`       | string  | no          | Service description                                    |
+| `workingDirectory`  | string  | no          | Process working directory                              |
+| `command`           | string  | **yes**     | Executable path or command                             |
+| `arguments`         | array   | no          | Command arguments                                      |
+| `shell`             | boolean | no          | ⚠ **Run mode - critical, see below** (default: false) |
+| `ports`             | array   | no          | Service ports (for port health check, empty disables) |
+| `ephemeral`         | boolean | no          | Launcher pattern - exits after starting (default: false) |
+| `autoRestart`       | boolean | no          | Auto-restart on crash (default: false, ignored for ephemeral) |
+| `maxRetries`        | number  | no          | Max restart attempts (default: 3)                     |
+| `dependsOn`         | array   | no          | Dependent services (affects startup order)            |
+| `elevated`          | boolean | no          | Elevate via sudo                                       |
+| `env`               | object  | no          | Environment variables to inject                        |
+| `inheritEnv`        | boolean | no          | Inherit system env vars (default: true)               |
+| `shutdownCommand`   | string  | conditional | Custom shutdown command (**required** for ephemeral)  |
+| `shutdownArguments` | array   | no          | Arguments for shutdownCommand                          |
+| `legacyProcessName` | string  | no          | Additional process name for legacy cleanup            |
 
 ### Shell Mode vs Direct Execution
 
-The `shell` option controls how commands are executed:
+The `shell` option controls command execution:
 
-| Mode       | `shell` | Execution Method    | Best For                                     |
-| ---------- | ------- | ------------------- | -------------------------------------------- |
-| **Direct** | `false` | `& $command $args`  | Native executables, precise argument passing |
-| **Shell**  | `true`  | `Invoke-Expression` | CLI tools (npx, uvx), shell features needed  |
+| Mode           | `shell` | Execution Method    | Best For                              |
+| -------------- | ------- | ------------------- | ------------------------------------- |
+| **Direct**     | `false` | `& $command $args`  | Native executables; precise args      |
+| **Shell**      | `true`  | `Invoke-Expression` | CLI tools; shell features needed      |
 
 **Direct mode (`shell: false`)** - Default:
 
-- Arguments passed as separate tokens, preserving boundaries
-- No shell interpretation (no pipes, redirects, wildcards)
-- Example: `["--port", "8080"]` → two exact arguments
+- Each argument passed as separate token, boundaries preserved
+- No shell features (no pipes, redirects, wildcards, PATH)
+- Recommended for direct executables
 
 **Shell mode (`shell: true`)**:
 
-- Command executed as a string via PowerShell shell
-- Enables shell features: PATH resolution, pipes, redirects
-- Arguments are properly quoted/escaped for shell
-- Example: `npx my-package` → resolves via PATH, executes in shell
-
-**When to use `shell: true`:**
-
-- `npx`, `uvx`, `pipx` and other package runners (need PATH resolution)
-- Commands requiring shell features (`node script.js | tee log.txt`)
-- Commands with special characters that need shell interpretation
-
-**When to use `shell: false`:**
-
-- Direct executable paths (`C:/path/to/service.exe`)
-- When you need exact argument boundaries
-- When arguments contain spaces (no shell quoting issues)
+- Command concatenated as string, executed via pwsh
+- Arguments properly quoted and escaped
+- Recommended for CLI tools and package runners (`npx`, `uvx`, `pipx`)
 
 ### Ephemeral Services (Launcher Pattern)
 
-Some services are **launcher scripts** that start other processes and then exit immediately. For example:
+Some services are **launcher scripts** that start other processes then exit immediately. For example:
 
-- A wrapper script that launches a background daemon (`nohup my-daemon &`)
-- A CLI tool that starts a service and exits (like `cloudflared tunnel run` in certain modes)
-- A process manager script that spawns child processes
+- Wrapper scripts that launch background daemons (`nohup my-daemon &`)
+- CLI tools that start services and exit
+- Process manager scripts that spawn child processes
 
 For these cases, use `ephemeral: true`:
 
@@ -187,17 +153,11 @@ For these cases, use `ephemeral: true`:
 }
 ```
 
-**Behavior:**
+**Notes:**
 
+- `shutdownCommand` is **required** for ephemeral services
+- `autoRestart` doesn't apply to ephemeral services
 - PID file contains `'ephemeral'` marker instead of real PID
-- Watchdog **skips process monitoring** (no auto-restart)
-- `pp2 stop` calls `shutdownCommand` to clean up spawned processes
-- Status shows `Running (ephemeral)` with PID = `-`
-
-**Requirements:**
-
-- `shutdownCommand` is **mandatory** for ephemeral services
-- `autoRestart` is automatically disabled (cannot monitor ephemeral processes)
 
 ### Global Settings
 
@@ -214,21 +174,21 @@ Configure in `services.json` under `settings`:
 }
 ```
 
-| Field               | Type   | Default | Description                                  |
-| ------------------- | ------ | ------- | -------------------------------------------- |
-| `watchdogInterval`  | number | 60      | Watchdog check interval (seconds)            |
-| `portCheckTimeout`  | number | 200     | Port check timeout (milliseconds)            |
-| `startupVerifyWait` | number | 2500    | Startup verification wait (milliseconds)     |
-| `shutdownTimeout`   | number | 5000    | Shutdown process exit timeout (milliseconds) |
+| Field               | Type   | Default | Description                        |
+| ------------------- | ------ | ------- | ---------------------------------- |
+| `watchdogInterval`  | number | 60      | Watchdog check interval (seconds)  |
+| `portCheckTimeout`  | number | 200     | Port check timeout (milliseconds)  |
+| `startupVerifyWait` | number | 2500    | Startup verification wait (ms)     |
+| `shutdownTimeout`   | number | 5000    | Shutdown exit timeout (milliseconds) |
 
 ## Commands Reference
 
 ### Core Actions
 
 ```pwsh
-pp2 status [name]              # Show status table (-Format json for JSON output)
+pp2 status [name]              # Show status table (-Format json for JSON)
 pp2 status -Watch              # Live status dashboard (-Interval 5)
-pp2 start [name]               # Start service (autoRestart=true also starts watchdog)
+pp2 start [name]               # Start service (autoRestart=true starts watchdog)
 pp2 stop [name]                # Stop service
 pp2 restart [name]             # Restart service
 pp2 logs <name> [-Tail 80]     # View logs
@@ -268,6 +228,19 @@ pp2 startup-uninstall          # Remove from Windows startup
 -Config <path>                 # Use specified services.json file
 ```
 
+## Log Management
+
+Logs stored in `logs/` subdirectory under config directory:
+
+- `logs/<service>.out.log` - Standard output
+- `logs/<service>.err.log` - Standard error
+
+PID tracking in `run/` subdirectory under config directory:
+
+- `run/<service>.pid` - Process ID
+- `run/<service>.elevated` - Elevated service marker
+- `run/watchdog.pid` - Watchdog process ID
+
 ## Dependency Handling
 
 Services with `dependsOn` start in correct order. Stop operations use reverse dependency order:
@@ -287,71 +260,14 @@ Services with `dependsOn` start in correct order. Stop operations use reverse de
 - **Start order**: database → api → web
 - **Stop order**: web → api → database
 
-## Log Management
-
-Logs are stored next to `services.json` in the `logs/` directory:
-
-- `logs/<service>.out.log` - Standard output
-- `logs/<service>.err.log` - Standard error
-
-PID tracking is stored next to `services.json` in the `run/` directory:
-
-- `run/<service>.pid` - Process ID
-- `run/<service>.elevated` - Elevated service marker
-- `run/watchdog.pid` - Watchdog process ID
-
-## Configuration Examples
-
-### Node.js Service (npx)
-
-```json
-{
-  "my-app": {
-    "command": "npx",
-    "arguments": ["my-package", "--port", "3000"],
-    "ports": [3000],
-    "shell": true,
-    "autoRestart": true
-  }
-}
-```
-
-### Elevated Service
-
-```json
-{
-  "privileged-service": {
-    "command": "C:/path/to/service.exe",
-    "elevated": true,
-    "autoRestart": true
-  }
-}
-```
-
-### Custom Shutdown Command
-
-```json
-{
-  "graceful-service": {
-    "command": "C:/path/to/server.exe",
-    "shutdownCommand": "C:/path/to/server.exe",
-    "shutdownArguments": ["--shutdown"]
-  }
-}
-```
-
 ## Troubleshooting
 
 **Service won't start:**
 
 - Check `logs/<service>.err.log`
-- Verify port is not occupied: `netstat -ano | findstr :<port>`
+- Verify port not occupied: `netstat -ano | findstr :<port>`
 
 **Service won't auto-restart:**
 
 - Run `pp2 watchdog-status` to check status
 - Start manually: `pp2 watchdog-start`
-
-**Elevated service fails:**
-
-- Ensure sudo is installed
