@@ -79,7 +79,7 @@ pp2 startup-install
 
 ## Configuration
 
-Create `services.json` in the directory where you run `pp2`. For a source checkout, copy `module/pp2/services.example.json` to `services.json` in the repo root:
+Define services in `services.json` under the pp2 config directory. (Default: `$HOME/.pp2`, override with `PP2_HOME`)
 
 ```json
 {
@@ -265,6 +265,7 @@ pp2 startup-uninstall          # Remove from Windows startup
 -Tail 80                       # Log lines to display
 -Cols 3                        # monit max columns
 -Force                         # Skip confirmation prompts
+-Config <path>                 # Use specified services.json file
 ```
 
 ## Dependency Handling

@@ -22,6 +22,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $TestDir = Join-Path $Root 'test'
+$OriginalPp2Home = $env:PP2_HOME
+$env:PP2_HOME = $Root
 $Results = @{}
 $FailedTests = @()
 
@@ -506,6 +508,7 @@ finally {
   if (Test-Path $BackupConfig) {
     Move-Item $BackupConfig $OriginalConfig -Force
   }
+  $env:PP2_HOME = $OriginalPp2Home
 }
 
 Write-Header "Done"

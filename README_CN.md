@@ -6,15 +6,17 @@
 
 基于 PowerShell7，更适合 Windows 的服务管理器。一站式管理后台运行的命令行程序。
 
+**pp2 = PowerShell × pm2**
+
 ## 安装
 
 ### 前置要求
 
 - **PowerShell 7+**: 必需 (`winget install Microsoft.PowerShell`)
-- **Windows Terminal**: 推荐用于 `monit` (`winget install Microsoft.WindowsTerminal`)
-- **sudo for Windows**: 可选，用于提权服务 (`winget install gerardog.gsudo`)
+- **Windows Terminal**: 可选，用于 `monit` 命令 (`winget install Microsoft.WindowsTerminal`)
+- **sudo for Windows**: 可选，用于 `elevated` 选项 (`winget install gerardog.gsudo`)
 
-### PowerShell Gallery
+### 通过 PowerShell Gallery 安装
 
 ```pwsh
 Install-Module pp2 -Scope CurrentUser
@@ -26,24 +28,15 @@ Install-Module pp2 -Scope CurrentUser
 
 卸载：`Uninstall-Module pp2`
 
-### 源码运行
+### 从源码运行
 
-仅用于开发或不安装模块时的测试：
+仅用于开发测试：
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
 cd pp2
 .\pp2.ps1 status
 ```
-
-## 功能特性
-
-- **没有 Bullshit**：只要能通过命令行启动，就能通过 pp2 管理，没有奇怪的适配问题。支持环境变量注入和启动目录配置
-- **自动重启**：Watchdog 监控，服务崩溃时自动重启
-- **日志查看**：集中管理运行日志，支持 Windows Terminal 分栏监控
-- **端口检查**：检查端口健康，处理端口占用
-- **Windows 启动集成**：设置服务随用户登录自动启动
-- **权限提升**：支持 Sudo for Windows 为服务提权
 
 ## 快速开始
 
@@ -54,8 +47,11 @@ pp2 status
 # 启动所有服务
 pp2 start all
 
-# 停止所有服务
-pp2 stop all
+# 停止服务
+pp2 stop my-service
+
+# 查看运行日志
+pp2 logs my-service
 
 # 多窗格日志监控（需要 Windows Terminal）
 pp2 monit
@@ -64,30 +60,26 @@ pp2 monit
 pp2 startup-install
 ```
 
-## 配置说明
+## 配置示例
 
-在运行 `pp2` 的目录创建 `services.json`。源码运行时，将 `module/pp2/services.example.json` 复制为仓库根目录的 `services.json`：
+在 pp2 配置目录的 `services.json` 中定义服务。（默认位置：`$HOME/.pp2`，可用 `PP2_HOME` 覆盖）
 
 ```json
 {
   "services": {
-    "my-service": {
-      "displayName": "我的服务",
-      "description": "状态显示的描述",
-      "workingDirectory": "C:/path/to/workdir",
-      "command": "C:/path/to/executable.exe",
-      "arguments": ["--port", "8080"],
-      "ports": [8080],
-      "autoRestart": true,
-      "maxRetries": 3,
-      "dependsOn": ["another-service"],
-      "elevated": false,
-      "env": {
-        "ENV_VAR": "value"
-      },
+    "http-server": {
+      "displayName": "Simple Http Server",
+      "description": "a simple http server",
+      "workingDirectory": "D:/path/to/website",
+      "command": "npx",
+      "arguments": ["-y", "http-server"],
       "shell": true,
-      "shutdownCommand": "C:/path/to/shutdown.exe",
-      "shutdownArguments": ["--stop"]
+      "env": {
+        "PORT": 1234
+      },
+      "ports": [1234],
+      "autoRestart": true,
+      "maxRetries": 3
     }
   }
 }
@@ -102,7 +94,7 @@ pp2 startup-install
 | `workingDirectory`  | string  | no          | 进程工作目录                                    |
 | `command`           | string  | **yes**     | 可执行文件路径或命令                            |
 | `arguments`         | array   | no          | 命令参数                                        |
-| `shell`             | boolean | no          | **运行模式 - 关键**（默认：false，见下文）      |
+| `shell`             | boolean | no          | ⚠ **运行模式 - 关键，见下文**（默认：false）      |
 | `ports`             | array   | no          | 服务端口（用于端口健康检查，空数组禁用）        |
 | `ephemeral`         | boolean | no          | 启动器模式 - 进程启动后立即退出（默认：false）  |
 | `autoRestart`       | boolean | no          | 崩溃时自动重启（默认：false，ephemeral 时忽略） |
@@ -121,40 +113,27 @@ pp2 startup-install
 
 | 模式           | `shell` | 执行方法            | 适用场景                              |
 | -------------- | ------- | ------------------- | ------------------------------------- |
-| **直接执行**   | `false` | `& $command $args`  | 原生可执行文件，精确参数传递          |
-| **Shell 执行** | `true`  | `Invoke-Expression` | CLI 工具（npx, uvx），需要 shell 特性 |
+| **直接执行**   | `false` | `& $command $args`  | 原生可执行文件；精确参数传递          |
+| **Shell 执行** | `true`  | `Invoke-Expression` | CLI 工具；需要 shell 特性 |
 
 **直接模式 (`shell: false`)** - 默认：
 
-- 参数作为独立 token 传递，边界保持精确
-- 无 shell 解释（无管道、重定向、通配符）
-- 示例：`["--port", "8080"]` → 两个精确参数
+- 每个参数作为独立 token 传递，参数边界精确
+- shell 功能无效（无管道、重定向、通配符、PATH）
+- 建议用于直接可执行文件
 
 **Shell 模式 (`shell: true`)**：
 
-- 命令作为字符串通过 PowerShell shell 执行
-- 启用 shell 特性：PATH 解析、管道、重定向
-- 参数会被适当引号包裹/转义
-- 示例：`npx my-package` → 通过 PATH 解析，在 shell 中执行
-
-**何时使用 `shell: true`:**
-
-- `npx`、`uvx`、`pipx` 等包运行器（需要 PATH 解析）
-- 需要 shell 特性的命令（`node script.js | tee log.txt`）
-- 包含需要 shell 解释的特殊字符的命令
-
-**何时使用 `shell: false`:**
-
-- 直接可执行文件路径（`C:/path/to/service.exe`）
-- 需要精确参数边界
-- 参数包含空格（避免 shell 引号问题）
+- 命令拼接成字符串后，通过 pwsh 执行
+- 参数会被适当引号包裹和转义
+- 建议用于 CLI 工具和 `npx`、`uvx`、`pipx` 等包运行器
 
 ### Ephemeral 服务（启动器模式）
 
 某些服务是**启动器脚本**，启动其他进程后立即退出。例如：
 
 - 启动后台守护进程的包装脚本（`nohup my-daemon &`）
-- 启动服务后退出的 CLI 工具（如某些模式下的 `cloudflared tunnel run`）
+- 启动服务后退出的 CLI 工具
 - 生成子进程的进程管理脚本
 
 对于这种情况，使用 `ephemeral: true`：
@@ -174,17 +153,12 @@ pp2 startup-install
 }
 ```
 
-**行为说明：**
-
-- PID 文件包含 `'ephemeral'` 标记而非真实 PID
-- Watchdog **跳过进程监控**（无自动重启）
-- `pp2 stop` 调用 `shutdownCommand` 清理生成的进程
-- 状态显示 `Running (ephemeral)`，PID = `-`
-
-**要求：**
+**说明：**
 
 - `shutdownCommand` 对 ephemeral 服务是**必需的**
-- `autoRestart` 自动禁用（无法监控 ephemeral 进程）
+- `autoRestart` 不适用于ephemeral 服务
+- PID 文件包含 `'ephemeral'` 标记而非真实 PID
+
 
 ### 全局设置
 
@@ -252,7 +226,21 @@ pp2 startup-uninstall          # 从 Windows 启动移除
 -Tail 80                       # 显示日志行数
 -Cols 3                        # monit 最大列数
 -Force                         # 跳过确认提示
+-Config <path>                 # 使用指定的 services.json 文件
 ```
+
+## 日志管理
+
+日志存储在配置目录下的 `logs/` 子目录：
+
+- `logs/<service>.out.log` - 标准输出
+- `logs/<service>.err.log` - 标准错误
+
+PID 跟踪在配置目录下的 `run/` 子目录：
+
+- `run/<service>.pid` - 进程 ID
+- `run/<service>.elevated` - 提权服务标记
+- `run/watchdog.pid` - Watchdog 进程 ID
 
 ## 依赖处理
 
@@ -273,59 +261,6 @@ pp2 startup-uninstall          # 从 Windows 启动移除
 - **启动顺序**：database → api → web
 - **停止顺序**：web → api → database
 
-## 日志管理
-
-日志存储在 `services.json` 同目录下的 `logs/` 目录：
-
-- `logs/<service>.out.log` - 标准输出
-- `logs/<service>.err.log` - 标准错误
-
-PID 跟踪在 `services.json` 同目录下的 `run/` 目录：
-
-- `run/<service>.pid` - 进程 ID
-- `run/<service>.elevated` - 提权服务标记
-- `run/watchdog.pid` - Watchdog 进程 ID
-
-## 配置示例
-
-### Node.js 服务（npx）
-
-```json
-{
-  "my-app": {
-    "command": "npx",
-    "arguments": ["my-package", "--port", "3000"],
-    "ports": [3000],
-    "shell": true,
-    "autoRestart": true
-  }
-}
-```
-
-### 提权服务
-
-```json
-{
-  "privileged-service": {
-    "command": "C:/path/to/service.exe",
-    "elevated": true,
-    "autoRestart": true
-  }
-}
-```
-
-### 自定义关闭命令
-
-```json
-{
-  "graceful-service": {
-    "command": "C:/path/to/server.exe",
-    "shutdownCommand": "C:/path/to/server.exe",
-    "shutdownArguments": ["--shutdown"]
-  }
-}
-```
-
 ## 故障排查
 
 **服务无法启动：**
@@ -337,7 +272,3 @@ PID 跟踪在 `services.json` 同目录下的 `run/` 目录：
 
 - 运行 `pp2 watchdog-status` 检查状态
 - 手动启动：`pp2 watchdog-start`
-
-**提权服务失败：**
-
-- 确认已安装 sudo

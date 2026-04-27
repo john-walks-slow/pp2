@@ -24,16 +24,7 @@
     https://github.com/your-username/services
 #>
 
-$script:SourceCheckoutRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$script:Pp2Root = if ($env:PP2_HOME) {
-    $env:PP2_HOME
-}
-elseif (Test-Path (Join-Path $script:SourceCheckoutRoot 'pp2.ps1')) {
-    $script:SourceCheckoutRoot
-}
-else {
-    Join-Path $HOME '.pp2'
-}
+$script:Pp2Root = if ($env:PP2_HOME) { $env:PP2_HOME } else { Join-Path $HOME '.pp2' }
 $script:ConfigPath = Join-Path $script:Pp2Root 'services.json'
 
 # Import helper functions
@@ -68,13 +59,20 @@ function pp2 {
         [int]$Interval = 5,
         [int]$Cols = 3,
         [switch]$Force,
-        [switch]$Watch
+        [switch]$Watch,
+        [string]$Config
     )
     
     $ErrorActionPreference = 'Stop'
     
     # Initialize context with module directory as root
     Initialize-Pw2Context -ScriptRoot $script:Pp2Root
+    
+    # Override config path if specified
+    if ($Config) {
+        $script:ConfigPath = $Config
+        $script:Config = Get-Content $script:ConfigPath -Raw | ConvertFrom-Json
+    }
     
     switch ($Action) {
         'help' {
@@ -110,6 +108,7 @@ Options:
   -Tail 80                   Log lines to show
   -Cols 3                    Max columns for monit layout
   -Force                     Skip confirmation prompts
+  -Config <path>             Use specified services.json file
 
 Examples:
   pp2 status

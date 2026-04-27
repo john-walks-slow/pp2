@@ -22,8 +22,8 @@ Catch {
     if ($ErrorMessage -like "*services.json*") {
         Write-Host "Error: services.json not found" -ForegroundColor Red
         Write-Host ""
-        Write-Host "Please create a services.json file. You can use the example as a template:" -ForegroundColor Yellow
-        Write-Host "  Copy services.example.json to services.json" -ForegroundColor Yellow
+        Write-Host "Please create services.json in pp2 home." -ForegroundColor Yellow
+        Write-Host "Default pp2 home: $HOME\.pp2" -ForegroundColor Yellow
     }
     else {
         Write-Error "Failed to initialize pp2: $_"
