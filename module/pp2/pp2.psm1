@@ -45,8 +45,8 @@ function pp2 {
     #>
     param(
         [Parameter(Position = 0)]
-        [ValidateSet('status', 'start', 'stop', 'restart', 'logs', 'monit', 'list', 'internal-start',
-                     'watchdog-start', 'watchdog-stop', 'watchdog-status',
+        [ValidateSet('status', 'start', 'stop', 'restart', 'logs', 'monit', 'list', 'config',
+                     'internal-start', 'watchdog-start', 'watchdog-stop', 'watchdog-status',
                      'startup-install', 'startup-uninstall', 'help')]
         [string]$Action = 'status',
         
@@ -91,6 +91,7 @@ Core Actions:
 Utility Actions:
   monit [name]               Live logs in Windows Terminal split panes
   list                       List service names
+  config                     Open services.json in default editor
 
 Watchdog Control:
   watchdog-start             Start auto-restart monitor
@@ -150,6 +151,7 @@ Examples:
             Show-Logs $Name $Tail $Watch.IsPresent
         }
         'monit' { Show-Monit $Name $Cols }
+        'config' { Open-ConfigFile }
         'watchdog-start' { Start-WatchdogProcess }
         'watchdog-stop' { Stop-Watchdog }
         'watchdog-status' { Show-WatchdogStatus }

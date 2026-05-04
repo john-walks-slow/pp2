@@ -2,14 +2,20 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ServiceName,
   
+  [string]$LogDir,
+  
   [int]$Tail = 50,
   
   [switch]$Watch
 )
 
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$LogDir = Join-Path $Root 'logs'
+
+# If LogDir not provided, detect from environment
+if (-not $LogDir) {
+  $Pp2Home = if ($env:PP2_HOME) { $env:PP2_HOME } else { Join-Path $HOME '.pp2' }
+  $LogDir = Join-Path $Pp2Home 'logs'
+}
 
 $OutLog = Join-Path $LogDir "$ServiceName.out.log"
 $ErrLog = Join-Path $LogDir "$ServiceName.err.log"

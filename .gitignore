@@ -37,6 +37,7 @@ Thumbs.db
 # NuGet packages
 *.nupkg
 module/pp2/_publish/
+module/pp2/_stage/
 
 # Secrets and credentials
 .env

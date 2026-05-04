@@ -16,27 +16,19 @@ PowerShell-based service manager for managing background processes with dependen
 - **Windows Terminal**: Optional for `monit` (`winget install Microsoft.WindowsTerminal`)
 - **sudo for Windows**: Optional for `elevated` option (`winget install gerardog.gsudo`)
 
-### PowerShell Gallery
-
-```pwsh
-Install-Module pp2 -Scope CurrentUser
-```
-
-The `pp2` command is available after installation.
-
-To update: `Update-Module pp2`
-
-To uninstall: `Uninstall-Module pp2`
-
-### Source Checkout
-
-For development/testing only:
+### Local Installation
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
 cd pp2
-.\pp2.ps1 status
+.\install.ps1
 ```
+
+The `pp2` command is available after installation.
+
+To reinstall: `.\install.ps1 -Force`
+
+To uninstall: `.\install.ps1 -Uninstall`
 
 ## Quick Start
 

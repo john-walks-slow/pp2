@@ -11,7 +11,34 @@ function Initialize-Pw2Context {
   $script:TaskName = 'pp2 Startup'
 
   New-Item -ItemType Directory -Force -Path $script:RunDir, $script:LogDir | Out-Null
-  $script:Config = Get-Content $script:ConfigPath -Raw | ConvertFrom-Json
+
+  # Auto-create default services.json if not exists
+  if (-not (Test-Path $script:ConfigPath)) {
+    # Create minimal valid config structure
+    $DefaultJson = '{"settings":{},"services":{}}'
+    Set-Content -Path $script:ConfigPath -Value $DefaultJson -Encoding UTF8
+    $script:Config = $DefaultJson | ConvertFrom-Json
+  } else {
+    # Handle empty file gracefully
+    $ConfigContent = (Get-Content $script:ConfigPath -Raw -ErrorAction SilentlyContinue).Trim()
+    if ([string]::IsNullOrWhiteSpace($ConfigContent)) {
+      $script:Config = '{"settings":{},"services":{}}' | ConvertFrom-Json
+    } else {
+      $script:Config = $ConfigContent | ConvertFrom-Json
+    }
+  }
+
+  # Ensure config has required structure (handle edge cases from JSON parsing)
+  if (-not $script:Config.PSObject.Properties['settings']) {
+    $script:Config | Add-Member -MemberType NoteProperty -Name 'settings' -Value ([PSCustomObject]@{}) -Force
+  }
+  if (-not $script:Config.PSObject.Properties['services']) {
+    $script:Config | Add-Member -MemberType NoteProperty -Name 'services' -Value ([PSCustomObject]@{}) -Force
+  }
+  # Ensure services is PSCustomObject not Hashtable
+  if ($script:Config.services -is [System.Collections.Hashtable]) {
+    $script:Config.services = [PSCustomObject]$script:Config.services
+  }
 }
 
 function Get-Setting([string]$Name, $Default) {
@@ -23,13 +50,23 @@ function Get-Setting([string]$Name, $Default) {
 }
 
 function Get-ServiceNames([string]$Name = 'all') {
-  if ($Name -eq 'all') { return @($Config.services.PSObject.Properties.Name) }
-  if (-not $Config.services.PSObject.Properties[$Name]) { throw "Unknown service: $Name" }
+  $ServicesObj = $script:Config.services
+  if ($Name -eq 'all') {
+    if ($null -eq $ServicesObj) { return @() }
+    $Props = $ServicesObj.PSObject.Properties
+    if ($null -eq $Props) { return @() }
+    $PropCount = @($Props).Count
+    if ($PropCount -eq 0) { return @() }
+    return @($Props.Name)
+  }
+  if ($null -eq $ServicesObj -or $null -eq $ServicesObj.PSObject.Properties[$Name]) { 
+    throw "Unknown service: $Name" 
+  }
   return @($Name)
 }
 
 function Get-ServiceConfig([string]$ServiceName) {
-  $Property = $Config.services.PSObject.Properties[$ServiceName]
+  $Property = $script:Config.services.PSObject.Properties[$ServiceName]
   if (-not $Property) { throw "Unknown service: $ServiceName" }
   return $Property.Value
 }
@@ -38,6 +75,28 @@ function Get-ServiceProperty([pscustomobject]$Service, [string]$PropertyName, $D
   $Property = $Service.PSObject.Properties[$PropertyName]
   if ($Property) { return $Property.Value }
   return $Default
+}
+
+function Open-ConfigFile {
+  <#
+  .SYNOPSIS
+    Open the services.json config file in default editor
+  #>
+  $Editor = $env:EDITOR
+  if (-not $Editor) {
+    # Try common editors on Windows
+    $Editor = (Get-Command code.cmd -ErrorAction SilentlyContinue).Source
+    if (-not $Editor) { $Editor = (Get-Command notepad.exe -ErrorAction SilentlyContinue).Source }
+  }
+  
+  if (-not $Editor) {
+    Write-Host "No editor found. Set EDITOR env var or install VS Code."
+    Write-Host "Config path: $script:ConfigPath"
+    return
+  }
+
+  Write-Host "Opening config: $script:ConfigPath"
+  & $Editor $script:ConfigPath
 }
 
 function Test-IsElevated {
@@ -171,12 +230,17 @@ function Test-Dependencies([string]$ServiceName) {
 function Get-StopOrder([string[]]$ServiceNames) {
   if ($ServiceNames.Count -le 1) { return $ServiceNames }
 
+  $ServicesObj = $script:Config.services
   $DependentsOf = @{}
-  foreach ($ServiceName in $Config.services.PSObject.Properties.Name) { $DependentsOf[$ServiceName] = @() }
-
-  foreach ($ServiceName in $Config.services.PSObject.Properties.Name) {
-    foreach ($Dep in @(Get-ServiceProperty (Get-ServiceConfig $ServiceName) 'dependsOn' @()) | Where-Object { $_ }) {
-      if ($DependentsOf.ContainsKey($Dep)) { $DependentsOf[$Dep] += $ServiceName }
+  if ($null -ne $ServicesObj) {
+    $Props = $ServicesObj.PSObject.Properties
+    if ($null -ne $Props -and @($Props).Count -gt 0) {
+      foreach ($ServiceName in @($Props.Name)) { $DependentsOf[$ServiceName] = @() }
+      foreach ($ServiceName in @($Props.Name)) {
+        foreach ($Dep in @(Get-ServiceProperty (Get-ServiceConfig $ServiceName) 'dependsOn' @()) | Where-Object { $_ }) {
+          if ($DependentsOf.ContainsKey($Dep)) { $DependentsOf[$Dep] += $ServiceName }
+        }
+      }
     }
   }
 
@@ -484,9 +548,9 @@ function Watch-Status([string]$Name, [string]$Format, [int]$Interval) {
 }
 
 function Show-Logs([string]$ServiceName, [int]$Tail, [bool]$WatchMode) {
-  $WatchLogsPath = Join-Path $Root 'lib/pp2-watch-logs.ps1'
-  if ($WatchMode) { & $WatchLogsPath -ServiceName $ServiceName -Tail $Tail -Watch }
-  else { & $WatchLogsPath -ServiceName $ServiceName -Tail $Tail }
+  $WatchLogsPath = Join-Path $script:ModuleRoot 'lib/pp2-watch-logs.ps1'
+  if ($WatchMode) { & $WatchLogsPath -ServiceName $ServiceName -LogDir $script:LogDir -Tail $Tail -Watch }
+  else { & $WatchLogsPath -ServiceName $ServiceName -LogDir $script:LogDir -Tail $Tail }
 }
 
 function Show-Monit([string]$Name, [int]$Cols) {
@@ -504,9 +568,9 @@ function Show-Monit([string]$Name, [int]$Cols) {
   $MaxCols = [math]::Max(1, $Cols)
   $RowCount = [int][math]::Ceiling($ServicesToMonitor.Count / $MaxCols)
   $WindowName = "lib/pp2-monit-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-  $WatchLogsPath = Join-Path $Root 'lib/pp2-watch-logs.ps1'
+  $WatchLogsPath = Join-Path $script:ModuleRoot 'lib/pp2-watch-logs.ps1'
 
-  function Get-MonitLogArgs([string]$Svc) { @($Pwsh, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $WatchLogsPath, '-ServiceName', $Svc, '-Watch') }
+  function Get-MonitLogArgs([string]$Svc) { @($Pwsh, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $WatchLogsPath, '-ServiceName', $Svc, '-LogDir', $script:LogDir, '-Watch') }
   function Invoke-WtCommand([string[]]$CommandArgs) {
     $WtCommandArgs = @('-w', $WindowName) + $CommandArgs
     & $WtPath @WtCommandArgs

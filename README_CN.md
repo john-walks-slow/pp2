@@ -16,27 +16,19 @@
 - **Windows Terminal**: 可选，用于 `monit` 命令 (`winget install Microsoft.WindowsTerminal`)
 - **sudo for Windows**: 可选，用于 `elevated` 选项 (`winget install gerardog.gsudo`)
 
-### 通过 PowerShell Gallery 安装
-
-```pwsh
-Install-Module pp2 -Scope CurrentUser
-```
-
-安装后，`pp2` 命令自动可用。
-
-更新：`Update-Module pp2`
-
-卸载：`Uninstall-Module pp2`
-
-### 从源码运行
-
-仅用于开发测试：
+### 本地安装
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
 cd pp2
-.\pp2.ps1 status
+.\install.ps1
 ```
+
+安装后，`pp2` 命令自动可用。
+
+重新安装：`.\install.ps1 -Force`
+
+卸载：`.\install.ps1 -Uninstall`
 
 ## 快速开始
 
