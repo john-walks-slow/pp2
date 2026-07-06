@@ -51,7 +51,7 @@ function pp2 {
         [string]$Action = 'status',
         
         [Parameter(Position = 1)]
-        [string]$Name = 'all',
+        [string[]]$Name = @('all'),
         
         [int]$Tail = 80,
         [ValidateSet('table', 'json')]
@@ -126,14 +126,10 @@ Examples:
         }
         'start' {
             Start-WatchdogIfNeeded $Name
-            foreach ($ServiceName in Get-ServiceNames $Name) { 
-                Start-One $ServiceName $Force.IsPresent | Out-Null 
-            }
+            Start-Many (Get-ServiceNames $Name) $Force.IsPresent
         }
         'internal-start' {
-            foreach ($ServiceName in Get-ServiceNames $Name) {
-                Start-One $ServiceName $true | Out-Null
-            }
+            Start-Many (Get-ServiceNames $Name) $true
         }
         'stop' { Stop-Many (Get-ServiceNames $Name) }
         'restart' {
@@ -141,9 +137,7 @@ Examples:
             Stop-Many $ServicesToRestart
             Start-Sleep -Seconds 1
             Start-WatchdogIfNeeded $Name
-            foreach ($ServiceName in $ServicesToRestart) { 
-                Start-One $ServiceName $Force.IsPresent | Out-Null 
-            }
+            Start-Many $ServicesToRestart $Force.IsPresent
         }
         'logs' {
             if ($Name -eq 'all') { throw 'logs requires a service name' }

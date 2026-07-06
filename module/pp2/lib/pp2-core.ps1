@@ -49,9 +49,13 @@ function Get-Setting([string]$Name, $Default) {
   return $Default
 }
 
-function Get-ServiceNames([string]$Name = 'all') {
+function Get-ServiceNames([string[]]$Name = @('all')) {
   $ServicesObj = $script:Config.services
-  if ($Name -eq 'all') {
+  
+  # Flatten all requested names (handles 'all' or multiple service names)
+  $RequestedNames = @($Name | Where-Object { $_ -ne 'all' })
+  if ($RequestedNames.Count -eq 0) {
+    # 'all' case - return all services
     if ($null -eq $ServicesObj) { return @() }
     $Props = $ServicesObj.PSObject.Properties
     if ($null -eq $Props) { return @() }
@@ -59,10 +63,14 @@ function Get-ServiceNames([string]$Name = 'all') {
     if ($PropCount -eq 0) { return @() }
     return @($Props.Name)
   }
-  if ($null -eq $ServicesObj -or $null -eq $ServicesObj.PSObject.Properties[$Name]) { 
-    throw "Unknown service: $Name" 
+  
+  # Validate each requested service exists
+  foreach ($ServiceName in $RequestedNames) {
+    if ($null -eq $ServicesObj -or $null -eq $ServicesObj.PSObject.Properties[$ServiceName]) { 
+      throw "Unknown service: $ServiceName" 
+    }
   }
-  return @($Name)
+  return $RequestedNames
 }
 
 function Get-ServiceConfig([string]$ServiceName) {
@@ -227,38 +235,82 @@ function Test-Dependencies([string]$ServiceName) {
   return $true
 }
 
-function Get-StopOrder([string[]]$ServiceNames) {
-  if ($ServiceNames.Count -le 1) { return $ServiceNames }
+function Get-DependencyLayers([string[]]$ServiceNames, [switch]$Reverse) {
+  <#
+  .SYNOPSIS
+    Group services into dependency layers for parallel execution
+    
+  .DESCRIPTION
+    Returns array of layers (each layer is array of service names).
+    For start: layer 0 = no dependencies, layer 1 = depends on layer 0, etc.
+    For stop: reverse order (dependents first, then dependencies)
+    
+  .PARAMETER Reverse
+    If true, returns layers in reverse order (for stop: dependents first)
+  #>
+  $ServiceNames = @($ServiceNames)  # Ensure array
+  $IsReverse = $Reverse.IsPresent
+  if ($ServiceNames.Count -eq 0) { return @() }
+  if ($ServiceNames.Count -eq 1) { return @(@($ServiceNames)) }
 
   $ServicesObj = $script:Config.services
-  $DependentsOf = @{}
-  if ($null -ne $ServicesObj) {
-    $Props = $ServicesObj.PSObject.Properties
-    if ($null -ne $Props -and @($Props).Count -gt 0) {
-      foreach ($ServiceName in @($Props.Name)) { $DependentsOf[$ServiceName] = @() }
-      foreach ($ServiceName in @($Props.Name)) {
-        foreach ($Dep in @(Get-ServiceProperty (Get-ServiceConfig $ServiceName) 'dependsOn' @()) | Where-Object { $_ }) {
-          if ($DependentsOf.ContainsKey($Dep)) { $DependentsOf[$Dep] += $ServiceName }
-        }
+  $DependsOn = @{}  # Service -> its dependencies
+  $DependentsOf = @{}  # Service -> services that depend on it
+  
+  # Initialize maps
+  foreach ($ServiceName in $ServiceNames) {
+    $DependsOn[$ServiceName] = @()
+    $DependentsOf[$ServiceName] = @()
+  }
+  
+  # Build dependency graph
+  foreach ($ServiceName in $ServiceNames) {
+    $Service = Get-ServiceConfig $ServiceName
+    foreach ($Dep in @(Get-ServiceProperty $Service 'dependsOn' @()) | Where-Object { $_ }) {
+      if ($Dep -in $ServiceNames) {
+        $DependsOn[$ServiceName] += $Dep
+        $DependentsOf[$Dep] += $ServiceName
       }
     }
   }
 
-  $Ordered = @()
+  # Build layers using topological sort
+  $Layers = @()
   $Remaining = @($ServiceNames)
+  
   while ($Remaining.Count -gt 0) {
-    $ProgressMade = $false
+    # Find services with no unresolved dependencies (or no dependents for reverse)
+    $Layer = @()
+    $PrevLayer = if ($Layers.Count -gt 0) { @($Layers[-1]) } else { @() }
     foreach ($ServiceName in @($Remaining)) {
-      $Dependents = @($DependentsOf[$ServiceName]) | Where-Object { $_ -in $ServiceNames }
-      if ((@($Dependents | Where-Object { $_ -notin $Ordered })).Count -eq 0) {
-        $Ordered += $ServiceName
-        $Remaining = @($Remaining | Where-Object { $_ -ne $ServiceName })
-        $ProgressMade = $true
+      if ($IsReverse) {
+        # For stop: no dependents remaining in this batch
+        $UnresolvedDependents = @(@($DependentsOf[$ServiceName]) | Where-Object { $_ -in $Remaining -and $_ -notin $PrevLayer })
+        if ($UnresolvedDependents.Count -eq 0) { $Layer += $ServiceName }
+      } else {
+        # For start: no dependencies remaining in this batch
+        $UnresolvedDeps = @(@($DependsOn[$ServiceName]) | Where-Object { $_ -in $Remaining -and $_ -notin $PrevLayer })
+        if ($UnresolvedDeps.Count -eq 0) { $Layer += $ServiceName }
       }
     }
-    if (-not $ProgressMade) { return @($Ordered + $Remaining) }
+    
+    if ($Layer.Count -eq 0) {
+      # Circular dependency or remaining services - add all remaining as final layer
+      $Layers += @($Remaining)
+      break
+    }
+    
+    $Layers += @($Layer)
+    $Remaining = @($Remaining | Where-Object { $_ -notin $Layer })
   }
-  return $Ordered
+  
+  return $Layers
+}
+
+function Get-StopOrder([string[]]$ServiceNames) {
+  # Legacy function - returns flat array for compatibility
+  $Layers = Get-DependencyLayers $ServiceNames -Reverse
+  return $Layers | ForEach-Object { $_ }  # Flatten
 }
 
 function Stop-One([string]$ServiceName) {
@@ -308,7 +360,32 @@ function Stop-One([string]$ServiceName) {
 }
 
 function Stop-Many([string[]]$ServiceNames) {
-  foreach ($ServiceName in (Get-StopOrder $ServiceNames)) { Stop-One $ServiceName }
+  $ServiceNames = @($ServiceNames)  # Ensure array
+  $Layers = Get-DependencyLayers $ServiceNames -Reverse
+  foreach ($Layer in $Layers) {
+    $Layer = @($Layer)  # Ensure layer is array
+    if ($Layer.Count -eq 1) {
+      Stop-One $Layer[0]
+    } else {
+      # Parallel stop for same layer
+      $Jobs = $Layer | ForEach-Object {
+        Start-ThreadJob -ScriptBlock {
+          param($ServiceName, $ModuleRoot, $Root, $ConfigJson)
+          $script:ModuleRoot = $ModuleRoot
+          $script:Root = $Root
+          $script:Config = $ConfigJson | ConvertFrom-Json
+          $script:ConfigPath = Join-Path $Root 'services.json'
+          $script:RunDir = Join-Path $Root 'run'
+          $script:LogDir = Join-Path $Root 'logs'
+          # Import Stop-One and its dependencies
+          . (Join-Path $ModuleRoot 'lib/pp2-core.ps1')
+          Stop-One $ServiceName
+        } -ArgumentList $_, $script:ModuleRoot, $script:Root, ($script:Config | ConvertTo-Json -Depth 10)
+      }
+      $Jobs | Wait-Job | Receive-Job
+      $Jobs | Remove-Job
+    }
+  }
 }
 
 function Stop-Watchdog {
@@ -363,7 +440,7 @@ function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
   Move-Item -Path $TempPidPath -Destination $WatchPidPath -Force
 }
 
-function Start-WatchdogIfNeeded([string]$Name = 'all') {
+function Start-WatchdogIfNeeded([string[]]$Name = @('all')) {
   $NeedsWatchdog = (Get-ServiceNames $Name | Where-Object { Get-ServiceProperty (Get-ServiceConfig $_) 'autoRestart' $false } | Select-Object -First 1) -ne $null
   if ($NeedsWatchdog) { Start-WatchdogProcess -ReplaceExisting }
 }
@@ -493,7 +570,36 @@ Set-Content -Path $(ConvertTo-PwshLiteral $TempPidFile) -Value `$Process.Id -NoN
   return $true
 }
 
-function Show-Status([string]$Name = 'all', [string]$Format = 'table') {
+function Start-Many([string[]]$ServiceNames, [bool]$Force) {
+  $ServiceNames = @($ServiceNames)  # Ensure array
+  $Layers = Get-DependencyLayers $ServiceNames
+  foreach ($Layer in $Layers) {
+    $Layer = @($Layer)  # Ensure layer is array
+    if ($Layer.Count -eq 1) {
+      Start-One $Layer[0] $Force | Out-Null
+    } else {
+      # Parallel start for same layer
+      $Jobs = $Layer | ForEach-Object {
+        Start-ThreadJob -ScriptBlock {
+          param($ServiceName, $Force, $ModuleRoot, $Root, $ConfigJson)
+          $script:ModuleRoot = $ModuleRoot
+          $script:Root = $Root
+          $script:Config = $ConfigJson | ConvertFrom-Json
+          $script:ConfigPath = Join-Path $Root 'services.json'
+          $script:RunDir = Join-Path $Root 'run'
+          $script:LogDir = Join-Path $Root 'logs'
+          # Import Start-One and its dependencies
+          . (Join-Path $ModuleRoot 'lib/pp2-core.ps1')
+          Start-One $ServiceName $Force | Out-Null
+        } -ArgumentList $_, $Force, $script:ModuleRoot, $script:Root, ($script:Config | ConvertTo-Json -Depth 10)
+      }
+      $Jobs | Wait-Job | Receive-Job
+      $Jobs | Remove-Job
+    }
+  }
+}
+
+function Show-Status([string[]]$Name = @('all'), [string]$Format = 'table') {
   $Rows = foreach ($ServiceName in Get-ServiceNames $Name) {
     $Service = Get-ServiceConfig $ServiceName
     $ProcessOrEphemeral = Get-RecordedProcess $ServiceName
@@ -538,7 +644,7 @@ function Show-Status([string]$Name = 'all', [string]$Format = 'table') {
   else { $Rows | Format-Table -AutoSize }
 }
 
-function Watch-Status([string]$Name, [string]$Format, [int]$Interval) {
+function Watch-Status([string[]]$Name, [string]$Format, [int]$Interval) {
   while ($true) {
     Clear-Host
     Write-Host "$(Get-Date -Format 'HH:mm:ss') Service Status (Ctrl+C to exit)"
@@ -553,7 +659,7 @@ function Show-Logs([string]$ServiceName, [int]$Tail, [bool]$WatchMode) {
   else { & $WatchLogsPath -ServiceName $ServiceName -LogDir $script:LogDir -Tail $Tail }
 }
 
-function Show-Monit([string]$Name, [int]$Cols) {
+function Show-Monit([string[]]$Name, [int]$Cols) {
   $WtPath = (Get-Command wt.exe -ErrorAction SilentlyContinue).Source
   if (-not $WtPath) {
     Write-Host "Windows Terminal not found. Install from Microsoft Store or winget."
