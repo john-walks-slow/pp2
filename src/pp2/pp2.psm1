@@ -24,8 +24,8 @@
     https://github.com/your-username/services
 #>
 
-$script:Pp2Root = if ($env:PP2_HOME) { $env:PP2_HOME } else { Join-Path $HOME '.pp2' }
-$script:ConfigPath = Join-Path $script:Pp2Root 'services.json'
+$script:Root = if ($env:PP2_HOME) { $env:PP2_HOME } else { Join-Path $HOME '.pp2' }
+$script:ConfigPath = Join-Path $script:Root 'services.json'
 
 # Import helper functions
 . (Join-Path $PSScriptRoot 'lib\pp2-core.ps1')
@@ -65,12 +65,12 @@ function pp2 {
     
     $ErrorActionPreference = 'Stop'
     
-    # Initialize context with module directory as root
-    Initialize-Pw2Context -ScriptRoot $script:Pp2Root
+    # Override config path before init to avoid auto-creating default
+    if ($Config) { $script:ConfigPath = $Config }
+
+    Initialize-Pp2Context -ScriptRoot $script:Root
     
-    # Override config path if specified
-    if ($Config) {
-        $script:ConfigPath = $Config
+    if ($Config -and (Test-Path $script:ConfigPath)) {
         $script:Config = Get-Content $script:ConfigPath -Raw | ConvertFrom-Json
     }
     
@@ -85,11 +85,11 @@ Core Actions:
   start [name]               Start services + watchdog if autoRestart enabled
   stop [name]                Stop services (respecting dependencies)
   restart [name]             Restart services + watchdog if needed
-  logs <name> [-Tail 120]    View service logs
-  logs <name> -Watch         Live log monitoring (Ctrl+C to exit)
+  logs <name> [-Tail 120]    Live log monitoring (default, Ctrl+C to exit)
+  logs <name> -Watch:\$false  Static log view
 
 Utility Actions:
-  monit [name]               Live logs in Windows Terminal split panes
+  monit [name]               Multi-pane live log dashboard (in-terminal)
   list                       List service names
   config                     Open services.json in default editor
 
@@ -107,7 +107,7 @@ Options:
   -Format json|table         Output format
   -Interval 5                Refresh interval for status -Watch
   -Tail 80                   Log lines to show
-  -Cols 3                    Max columns for monit layout
+  -Cols 3                    Max columns for monit dashboard grid
   -Force                     Skip confirmation prompts
   -Config <path>             Use specified services.json file
 
@@ -142,14 +142,14 @@ Examples:
         'logs' {
             if ($Name -eq 'all') { throw 'logs requires a service name' }
             Get-ServiceNames $Name | Out-Null
-            Show-Logs $Name $Tail $Watch.IsPresent
+            Show-Logs $Name $Tail ($Watch.IsPresent -or -not $PSBoundParameters.ContainsKey('Watch'))
         }
-        'monit' { Show-Monit $Name $Cols }
+        'monit' { Show-Monit $Name $Cols -Interactive:(-not $PSBoundParameters.ContainsKey('Name')) }
         'config' { Open-ConfigFile }
         'watchdog-start' { Start-WatchdogProcess }
         'watchdog-stop' { Stop-Watchdog }
         'watchdog-status' { Show-WatchdogStatus }
-        'startup-install' { Install-StartupTask (Join-Path $PSScriptRoot 'pp2.psd1') $script:Pp2Root }
+        'startup-install' { Install-StartupTask (Join-Path $PSScriptRoot 'pp2.psd1') $script:Root }
         'startup-uninstall' { Uninstall-StartupTask }
     }
 }

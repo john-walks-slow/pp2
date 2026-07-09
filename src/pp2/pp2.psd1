@@ -1,13 +1,16 @@
 @{
-    RootModule        = 'pp2.psm1'
-    ModuleVersion     = '1.0.0'
-    GUID              = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
-    Author            = 'JohnnRen'
-    CompanyName       = 'JohnnRen'
-    Copyright         = '(c) 2026 JohnnRen. MIT License.'
-    Description       = 'PowerShell-based service manager for managing background processes with dependency handling, auto-restart, and monitoring. Inspired by pm2.'
-    PowerShellVersion = '7.0'
-    
+    RootModule           = 'pp2.psm1'
+    ModuleVersion        = '1.0.0'
+    GUID                 = '6e5b2c1a-8f4d-4a3e-9b7c-2d1f0e8a6c4b'
+    Author               = 'JohnnRen'
+    CompanyName          = 'JohnnRen'
+    Copyright            = '(c) 2026 JohnnRen. MIT License.'
+    Description          = 'PowerShell-based service manager for managing background processes with dependency handling, auto-restart, and monitoring. Inspired by pm2.'
+    PowerShellVersion    = '7.0'
+    CompatiblePSEditions = @('Core')
+
+    RequiredModules     = @('ThreadJob')
+
     FunctionsToExport = @(
         'pp2'
         'Start-Pp2Service'
@@ -22,18 +25,18 @@
         'Install-Pp2Startup'
         'Uninstall-Pp2Startup'
     )
-    
+
     AliasesToExport = @()
-    
+
     PrivateData = @{
         PSData = @{
-            Tags         = @('powershell', 'process-manager', 'pm2', 'service-manager', 'windows', 'background-process')
+            Tags         = @('powershell', 'process-manager', 'pm2', 'service-manager', 'windows', 'background-process', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/john-walks-slow/pp2/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/john-walks-slow/pp2'
             IconUri      = ''
             ReleaseNotes = 'Initial release: PowerShell service manager with dependency handling, auto-restart, and monitoring.'
         }
     }
-    
+
     HelpInfoURI = 'https://github.com/john-walks-slow/pp2#readme'
 }

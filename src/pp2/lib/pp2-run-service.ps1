@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent $PSCommandPath) 'pp2-core.ps1')
-Initialize-Pw2Context -ScriptRoot $Root
+Initialize-Pp2Context -ScriptRoot $Root
 $Service = Get-ServiceConfig $Name
 
 if ((Get-ServiceProperty $Service 'inheritEnv' $true) -eq $false) {
@@ -38,20 +38,11 @@ $LogPath = Join-Path $script:LogDir "$Name.out.log"
 $Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
 if ((Get-ServiceProperty $Service 'shell' $false) -eq $true) {
-  # shell 模式：直接执行命令字符串，参数需要适当引号
-  $QuotedArgs = $ServiceArgs | ForEach-Object {
-    # 如果参数包含空格、引号或特殊字符，需要用双引号包裹
-    if ($_ -match ' |"|''|\&|\|') {
-      # 双引号包裹，内部双引号需要转义
-      '"' + ($_ -replace '"', '\\"') + '"'
-    } else { $_ }
-  }
-  $FullCommand = "$Command $($QuotedArgs -join ' ')"
+  $FullCommand = "$Command $($ServiceArgs -join ' ')"
   $ActualCmd = $FullCommand
-  # 记录实际执行的命令
   Add-Content -Path $LogPath -Value "[$Timestamp] shell: $ActualCmd"
-  # 直接执行命令字符串（不通过嵌套 pwsh）
-  Invoke-Expression $FullCommand
+  & (Get-PwshPath) -NoProfile -NonInteractive -Command $FullCommand
+  exit $LASTEXITCODE
 }
 else {
   # 直接调用：使用数组直接传递

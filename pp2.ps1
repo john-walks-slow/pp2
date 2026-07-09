@@ -10,8 +10,8 @@
 $ErrorActionPreference = 'Stop'
  
 Try {
-    # Import the module from the same directory
-    Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'module\pp2\pp2.psd1') -Force
+    # Import the module from the src/pp2 directory
+    Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'src\pp2\pp2.psd1') -Force
     
     # Call the pp2 function with all arguments
     pp2 @args

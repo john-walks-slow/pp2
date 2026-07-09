@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 . (Join-Path (Split-Path -Parent $PSCommandPath) 'pp2-core.ps1')
-Initialize-Pw2Context -ScriptRoot $Root
+Initialize-Pp2Context -ScriptRoot $Root
 
 $DefaultInterval = [int](Get-Setting 'watchdogInterval' 60)
 if (-not $Interval) { $Interval = $DefaultInterval }
@@ -63,6 +63,9 @@ while ($true) {
   foreach ($ServiceName in $Config.services.PSObject.Properties.Name) {
     $Service = Get-ServiceConfig $ServiceName
     
+    # Skip disabled services
+    if (-not (Get-ServiceProperty $Service 'enable' $true)) { continue }
+
     # Skip ephemeral services (they manage other processes, launcher pattern)
     $IsEphemeral = (Get-ServiceProperty $Service 'ephemeral' $false) -eq $true
     if ($IsEphemeral) {

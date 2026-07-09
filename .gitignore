@@ -1,12 +1,10 @@
 # PID files
 *.pid
 run/
-module/pp2/run/
 
 # Logs
 logs/
 *.log
-module/pp2/logs/
 
 # Test backups
 *.test-backup
@@ -36,8 +34,6 @@ Thumbs.db
 
 # NuGet packages
 *.nupkg
-module/pp2/_publish/
-module/pp2/_stage/
 
 # Secrets and credentials
 .env
@@ -48,4 +44,3 @@ credentials.json
 
 # Service configuration (local)
 services.json
-module/pp2/services.json

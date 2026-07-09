@@ -13,8 +13,15 @@ PowerShell-based service manager for managing background processes with dependen
 ### Prerequisites
 
 - **PowerShell 7+**: Required (`winget install Microsoft.PowerShell`)
-- **Windows Terminal**: Optional for `monit` (`winget install Microsoft.WindowsTerminal`)
+- **Windows Terminal**: Optional
 - **sudo for Windows**: Optional for `elevated` option (`winget install gerardog.gsudo`)
+
+### PowerShell Gallery (Recommended)
+
+```pwsh
+Install-Module -Name pp2 -Repository PSGallery
+Import-Module pp2
+```
 
 ### Local Installation
 
@@ -45,7 +52,7 @@ pp2 stop my-service
 # View logs
 pp2 logs my-service
 
-# Multi-pane log monitoring (requires Windows Terminal)
+# Multi-pane log monitoring dashboard
 pp2 monit
 
 # Auto-start on boot
@@ -81,6 +88,7 @@ Define services in `services.json` under the pp2 config directory. (Default: `$H
 
 | Field               | Type    | Required    | Description                                            |
 | ------------------- | ------- | ----------- | ------------------------------------------------------ |
+| `enable`            | boolean | no          | Enable/disable service (disabled services are invisible) |
 | `displayName`       | string  | no          | Display name                                           |
 | `description`       | string  | no          | Service description                                    |
 | `workingDirectory`  | string  | no          | Process working directory                              |
@@ -166,12 +174,13 @@ Configure in `services.json` under `settings`:
 }
 ```
 
-| Field               | Type   | Default | Description                        |
-| ------------------- | ------ | ------- | ---------------------------------- |
-| `watchdogInterval`  | number | 60      | Watchdog check interval (seconds)  |
-| `portCheckTimeout`  | number | 200     | Port check timeout (milliseconds)  |
-| `startupVerifyWait` | number | 2500    | Startup verification wait (ms)     |
-| `shutdownTimeout`   | number | 5000    | Shutdown exit timeout (milliseconds) |
+| Field               | Type   | Default | Description                              |
+| ------------------- | ------ | ------- | ---------------------------------------- |
+| `watchdogInterval`  | number | 60      | Watchdog check interval (seconds)        |
+| `portCheckTimeout`  | number | 200     | Port check timeout (milliseconds)        |
+| `startupVerifyWait` | number | 2500    | Startup verification wait (ms)           |
+| `shutdownTimeout`   | number | 5000    | Shutdown exit timeout (milliseconds)     |
+| `shutdownWaitDelay` | number | 2000    | Wait after shutdown command (ms)         |
 
 ## Commands Reference
 
@@ -183,14 +192,14 @@ pp2 status -Watch              # Live status dashboard (-Interval 5)
 pp2 start [name]               # Start service (autoRestart=true starts watchdog)
 pp2 stop [name]                # Stop service
 pp2 restart [name]             # Restart service
-pp2 logs <name> [-Tail 80]     # View logs
-pp2 logs <name> -Watch         # Live log monitoring
+pp2 logs <name> [-Tail 80]     # Live log monitoring (default, Ctrl+C to exit)
+pp2 logs <name> -Watch:$false  # Static log view
 ```
 
 ### Utility Commands
 
 ```pwsh
-pp2 monit [name] [-Cols 3]     # Windows Terminal multi-pane logs
+pp2 monit [name] [-Cols 3]     # Multi-pane log dashboard (Ctrl+C to exit)
 pp2 list                       # List service names
 ```
 

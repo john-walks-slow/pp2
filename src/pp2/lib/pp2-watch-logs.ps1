@@ -66,7 +66,7 @@ function Read-NewContent([string]$Path, [string]$Color) {
       $LastPos[$Path] = 0
     }
   }
-  catch { }
+  catch { Write-Debug "Failed to read $Path : $_" }
 }
 
 function Show-Static {

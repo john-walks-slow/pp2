@@ -1,66 +1,91 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Build pp2 nupkg package
+    Build and optionally publish pp2 module
 
 .DESCRIPTION
-    Creates a properly structured nupkg for the pp2 module as a zip file.
-    This method works around PowerShellGet Publish-Module issues.
+    Validates the module with PSScriptAnalyzer, tests module manifest,
+    and optionally publishes to PowerShell Gallery.
+
+.EXAMPLE
+    .\build.ps1
+    Build and validate the module
+
+.EXAMPLE
+    .\build.ps1 -Publish -NuGetApiKey $env:NUGET_API_KEY
+    Build and publish to PowerShell Gallery
+
+.EXAMPLE
+    .\build.ps1 -Version 1.1.0 -Publish -NuGetApiKey $env:NUGET_API_KEY
+    Build with specific version and publish
 #>
 
 param(
-    [string]$Version = '1.0.0'
+    [string]$Version = '1.0.0',
+    [switch]$Publish,
+    [string]$NuGetApiKey,
+    [string]$Repository = 'PSGallery'
 )
 
 $ErrorActionPreference = 'Stop'
-$ModuleRoot = $PSScriptRoot
+$ModuleRoot = Join-Path $PSScriptRoot 'src\pp2'
 $ModuleName = 'pp2'
 
-$PublishDir = Join-Path $ModuleRoot "module\$ModuleName\_publish"
+Write-Host "Building $ModuleName v$Version" -ForegroundColor Cyan
+Write-Host ('=' * 50) -ForegroundColor DarkGray
 
-Write-Host "Building pp2 nupkg v$Version" -ForegroundColor Cyan
-
-# Ensure publish directory exists
-if (-not (Test-Path $PublishDir)) {
-    New-Item -ItemType Directory -Path $PublishDir -Force | Out-Null
-}
-
-# Clean old nupkg
-Get-ChildItem $PublishDir -Filter "$ModuleName.*.nupkg" | Remove-Item -Force
-
-# Create temp staging directory
-$StageDir = Join-Path $env:TEMP "pp2-stage-$Version"
-if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
-New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
-
-# Copy module files (exclude dev directories and nuspec files)
-$SourceDir = Join-Path $ModuleRoot "module\$ModuleName"
-$ExcludeDirs = @('_publish', '_stage', 'logs', 'run', 'nuspec.xml', 'pp2.nuspec')
-
-Get-ChildItem -Path $SourceDir -Exclude $ExcludeDirs | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $StageDir -Recurse -Force
-}
-
-# Update version in psd1
-$Psd1Path = Join-Path $StageDir "$ModuleName.psd1"
+# 1. Update version in psd1
+Write-Host "[1/4] Updating version in manifest..." -ForegroundColor Cyan
+$Psd1Path = Join-Path $ModuleRoot "$ModuleName.psd1"
 $Psd1Content = Get-Content $Psd1Path -Raw
 $Psd1Content = $Psd1Content -replace "ModuleVersion\s*=\s*'[\d.]+'", "ModuleVersion = '$Version'"
 Set-Content -Path $Psd1Path -Value $Psd1Content -NoNewline
 
-# Create nupkg (just a zip with .nupkg extension)
-$NupkgPath = Join-Path $PublishDir "$ModuleName.$Version.nupkg"
+# 2. Run PSScriptAnalyzer
+Write-Host "[2/4] Running PSScriptAnalyzer..." -ForegroundColor Cyan
+$Analysis = Invoke-ScriptAnalyzer -Path $ModuleRoot -Recurse -Severity Warning -ErrorAction SilentlyContinue
+if ($Analysis) {
+    $Errors = $Analysis | Where-Object Severity -eq 'Error'
+    $Warnings = $Analysis | Where-Object Severity -eq 'Warning'
+    if ($Errors) {
+        Write-Host "  Errors: $($Errors.Count)" -ForegroundColor Red
+        $Errors | Format-Table -AutoSize
+    }
+    if ($Warnings) {
+        Write-Host "  Warnings: $($Warnings.Count)" -ForegroundColor Yellow
+        $Warnings | Format-Table -AutoSize
+    }
+    if ($Errors) {
+        throw "PSScriptAnalyzer found $($Errors.Count) error(s). Fix before publishing."
+    }
+} else {
+    Write-Host "  No issues found." -ForegroundColor Green
+}
 
-# Use Compress-Archive to create zip, then rename to nupkg
-$TempZip = Join-Path $env:TEMP "pp2-temp.zip"
-Compress-Archive -Path "$StageDir\*" -DestinationPath $TempZip -Force
-Move-Item $TempZip $NupkgPath -Force
+# 3. Test module manifest
+Write-Host "[3/4] Validating module manifest..." -ForegroundColor Cyan
+$Manifest = Test-ModuleManifest -Path $Psd1Path -ErrorAction Stop
+Write-Host "  Module: $($Manifest.Name) v$($Manifest.Version)" -ForegroundColor Green
+Write-Host "  Author: $($Manifest.Author)" -ForegroundColor Gray
+Write-Host "  Functions: $($Manifest.ExportedFunctions.Count)" -ForegroundColor Gray
 
-# Cleanup staging
-Remove-Item $StageDir -Recurse -Force -ErrorAction SilentlyContinue
+# 4. Publish
+if ($Publish) {
+    Write-Host "[4/4] Publishing to $Repository..." -ForegroundColor Cyan
 
-# Verify
-$Nupkg = Get-Item $NupkgPath
-Write-Host "Created: $($Nupkg.Name)" -ForegroundColor Green
-Write-Host "Size: $([math]::Round($Nupkg.Length / 1KB, 2)) KB" -ForegroundColor White
+    if (-not $NuGetApiKey) {
+        throw "NuGetApiKey is required for publishing."
+    }
 
-Write-Host "Done" -ForegroundColor Green
+    Publish-Module -Path $ModuleRoot `
+        -NuGetApiKey $NuGetApiKey `
+        -Repository $Repository `
+        -Force
+
+    Write-Host "  Published successfully!" -ForegroundColor Green
+} else {
+    Write-Host "[4/4] Skipped (use -Publish to publish)" -ForegroundColor DarkGray
+}
+
+Write-Host ""
+Write-Host "Build complete: $ModuleName v$Version" -ForegroundColor Green

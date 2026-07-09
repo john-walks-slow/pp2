@@ -13,7 +13,7 @@
 ### 前置要求
 
 - **PowerShell 7+**: 必需 (`winget install Microsoft.PowerShell`)
-- **Windows Terminal**: 可选，用于 `monit` 命令 (`winget install Microsoft.WindowsTerminal`)
+- **Windows Terminal**: 可选
 - **sudo for Windows**: 可选，用于 `elevated` 选项 (`winget install gerardog.gsudo`)
 
 ### 本地安装
@@ -45,7 +45,7 @@ pp2 stop my-service
 # 查看运行日志
 pp2 logs my-service
 
-# 多窗格日志监控（需要 Windows Terminal）
+# 多窗格日志监控仪表盘
 pp2 monit
 
 # 开机自启
@@ -184,14 +184,14 @@ pp2 status -Watch              # 实时状态仪表盘（-Interval 5）
 pp2 start [name]               # 启动服务（autoRestart 为 true 则同时启动 watchdog）
 pp2 stop [name]                # 停止服务
 pp2 restart [name]             # 重启服务
-pp2 logs <name> [-Tail 80]     # 查看日志
-pp2 logs <name> -Watch         # 实时日志监控
+pp2 logs <name> [-Tail 80]     # 实时日志监控（默认，Ctrl+C 退出）
+pp2 logs <name> -Watch:\$false  # 静态日志查看
 ```
 
 ### 工具命令
 
 ```pwsh
-pp2 monit [name] [-Cols 3]     # Windows Terminal 多窗格日志
+pp2 monit [name] [-Cols 3]     # 多窗格日志仪表盘（Ctrl+C 退出）
 pp2 list                       # 列出服务名称
 ```
 
@@ -216,7 +216,7 @@ pp2 startup-uninstall          # 从 Windows 启动移除
 -Format json|table             # status 输出格式
 -Interval 5                    # watch 刷新间隔（秒）
 -Tail 80                       # 显示日志行数
--Cols 3                        # monit 最大列数
+-Cols 3                        # monit 仪表盘最大列数
 -Force                         # 跳过确认提示
 -Config <path>                 # 使用指定的 services.json 文件
 ```

@@ -1,6 +1,7 @@
 Set-StrictMode -Version Latest
+$script:IsWindows = $env:OS -eq 'Windows_NT'
 
-function Initialize-Pw2Context {
+function Initialize-Pp2Context {
   param([Parameter(Mandatory = $true)][string]$ScriptRoot)
 
   $script:Root = $ScriptRoot
@@ -49,25 +50,30 @@ function Get-Setting([string]$Name, $Default) {
   return $Default
 }
 
+function Test-EnabledService([string]$ServiceName) {
+  $Service = Get-ServiceConfig $ServiceName
+  return (Get-ServiceProperty $Service 'enable' $true) -eq $true
+}
+
 function Get-ServiceNames([string[]]$Name = @('all')) {
   $ServicesObj = $script:Config.services
   
-  # Flatten all requested names (handles 'all' or multiple service names)
   $RequestedNames = @($Name | Where-Object { $_ -ne 'all' })
   if ($RequestedNames.Count -eq 0) {
-    # 'all' case - return all services
     if ($null -eq $ServicesObj) { return @() }
     $Props = $ServicesObj.PSObject.Properties
     if ($null -eq $Props) { return @() }
     $PropCount = @($Props).Count
     if ($PropCount -eq 0) { return @() }
-    return @($Props.Name)
+    return @($Props.Name | Where-Object { Test-EnabledService $_ })
   }
   
-  # Validate each requested service exists
   foreach ($ServiceName in $RequestedNames) {
     if ($null -eq $ServicesObj -or $null -eq $ServicesObj.PSObject.Properties[$ServiceName]) { 
       throw "Unknown service: $ServiceName" 
+    }
+    if (-not (Test-EnabledService $ServiceName)) {
+      throw "Unknown service: $ServiceName"
     }
   }
   return $RequestedNames
@@ -116,7 +122,9 @@ function Test-IsElevated {
 function Get-PwshPath {
   $Pwsh = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
   if ($Pwsh) { return $Pwsh }
-  return (Get-Command powershell.exe).Source
+  $Pwsh = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
+  if ($Pwsh) { return $Pwsh }
+  throw "PowerShell executable not found. Ensure PowerShell 7+ is installed."
 }
 
 function Get-StatePath([string]$ServiceName, [string]$Kind) { Join-Path $RunDir "$ServiceName.$Kind" }
@@ -164,6 +172,7 @@ function Test-Port([int]$Port, [int]$TimeoutMs) {
 }
 
 function Get-ProcessByPort([int]$Port) {
+  if (-not $IsWindows) { return $null }
   $Conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($Conn) { return [int]$Conn.OwningProcess }
   return $null
@@ -295,7 +304,7 @@ function Get-DependencyLayers([string[]]$ServiceNames, [switch]$Reverse) {
     }
     
     if ($Layer.Count -eq 0) {
-      # Circular dependency or remaining services - add all remaining as final layer
+      Write-Warning "Circular dependency detected among: $($Remaining -join ', ')"
       $Layers += @($Remaining)
       break
     }
@@ -346,7 +355,8 @@ function Stop-One([string]$ServiceName) {
   if (Get-ServiceProperty $Service 'shutdownCommand') {
     Write-Host "executing shutdown command for $ServiceName..."
     Invoke-ShutdownCommand $ServiceName $Service $IsElevated
-    Start-Sleep -Seconds 2
+    $ShutdownWait = [int](Get-Setting 'shutdownWaitDelay' 2000)
+    Start-Sleep -Milliseconds $ShutdownWait
     $ShutdownTimeout = [int](Get-Setting 'shutdownTimeout' 5000)
     $Process.WaitForExit($ShutdownTimeout)
   }
@@ -659,54 +669,182 @@ function Show-Logs([string]$ServiceName, [int]$Tail, [bool]$WatchMode) {
   else { & $WatchLogsPath -ServiceName $ServiceName -LogDir $script:LogDir -Tail $Tail }
 }
 
-function Show-Monit([string[]]$Name, [int]$Cols) {
-  $WtPath = (Get-Command wt.exe -ErrorAction SilentlyContinue).Source
-  if (-not $WtPath) {
-    Write-Host "Windows Terminal not found. Install from Microsoft Store or winget."
-    Write-Host "Fallback: Use 'pp2 logs <name>' to view logs."
-    return
-  }
-
+function Show-Monit([string[]]$Name, [int]$Cols, [switch]$Interactive) {
   $ServicesToMonitor = Get-ServiceNames $Name
   if ($ServicesToMonitor.Count -eq 0) { Write-Host 'No services to monitor'; return }
 
-  $Pwsh = Get-PwshPath
-  $MaxCols = [math]::Max(1, $Cols)
-  $RowCount = [int][math]::Ceiling($ServicesToMonitor.Count / $MaxCols)
-  $WindowName = "lib/pp2-monit-$PID-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-  $WatchLogsPath = Join-Path $script:ModuleRoot 'lib/pp2-watch-logs.ps1'
-
-  function Get-MonitLogArgs([string]$Svc) { @($Pwsh, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $WatchLogsPath, '-ServiceName', $Svc, '-LogDir', $script:LogDir, '-Watch') }
-  function Invoke-WtCommand([string[]]$CommandArgs) {
-    $WtCommandArgs = @('-w', $WindowName) + $CommandArgs
-    & $WtPath @WtCommandArgs
-    Start-Sleep -Milliseconds 200
-  }
-
-  $FirstPaneArgs = @('new-tab', '--title', $ServicesToMonitor[0], '--suppressApplicationTitle') + (Get-MonitLogArgs $ServicesToMonitor[0])
-  Invoke-WtCommand $FirstPaneArgs
-
-  for ($Row = 1; $Row -lt $RowCount; $Row++) {
-    $ServiceIndex = $Row * $MaxCols
-    $RemainingRows = $RowCount - $Row + 1
-    $PaneArgs = @('split-pane', '-H', '-s', [math]::Round(($RemainingRows - 1) / $RemainingRows, 2), '--title', $ServicesToMonitor[$ServiceIndex], '--suppressApplicationTitle') + (Get-MonitLogArgs $ServicesToMonitor[$ServiceIndex])
-    Invoke-WtCommand $PaneArgs
-  }
-
-  for ($Row = $RowCount - 1; $Row -ge 0; $Row--) {
-    $RowStart = $Row * $MaxCols
-    $ServicesInRow = [math]::Min($MaxCols, $ServicesToMonitor.Count - $RowStart)
-    for ($Col = 1; $Col -lt $ServicesInRow; $Col++) {
-      $ServiceIndex = $RowStart + $Col
-      $RemainingCols = $ServicesInRow - $Col + 1
-      $PaneArgs = @('split-pane', '-V', '-s', [math]::Round(($RemainingCols - 1) / $RemainingCols, 2), '--title', $ServicesToMonitor[$ServiceIndex], '--suppressApplicationTitle') + (Get-MonitLogArgs $ServicesToMonitor[$ServiceIndex])
-      Invoke-WtCommand $PaneArgs
+  # Interactive service selection (only when no Name arg specified)
+  if ($Interactive) {
+    $allServices = $ServicesToMonitor
+    if ($allServices.Count -eq 1) {
+      Write-Host "Only one service available: $($allServices[0])"
+    } else {
+      $idx = 0
+      $allServices | ForEach-Object { Write-Host "  [$($idx+1)] $_"; $idx++ }
+      Write-Host ''
+      $input = Read-Host "Select services (comma-separated numbers, or * for all)"
+      if ($input -eq '*' -or [string]::IsNullOrWhiteSpace($input)) { $ServicesToMonitor = $allServices }
+      else {
+        $parsed = @()
+        $invalid = @()
+        foreach ($token in ($input -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })) {
+          $num = 0
+          if ([int]::TryParse($token, [ref]$num)) {
+            if ($num -ge 1 -and $num -le $allServices.Count) { $parsed += $allServices[$num - 1] }
+            else { $invalid += $token }
+          } else { $invalid += $token }
+        }
+        if ($invalid.Count -gt 0) { Write-Host "Ignored invalid input: $($invalid -join ', ')" -ForegroundColor Yellow }
+        $ServicesToMonitor = $parsed
+        if ($ServicesToMonitor.Count -eq 0) { Write-Host 'No services selected'; return }
+      }
     }
-    if ($Row -gt 0) { Invoke-WtCommand @('move-focus', 'up') }
   }
 
-  Invoke-WtCommand @('move-focus', 'first')
-  Write-Host "Opened Windows Terminal with $($ServicesToMonitor.Count) services."
+  Show-MonitDashboard -Services $ServicesToMonitor -Cols $Cols
+}
+
+function Show-MonitDashboard {
+  param(
+    [Parameter(Mandatory)][string[]]$Services,
+    [int]$Cols = 3
+  )
+
+  $LogDir = $script:LogDir
+  $ServiceCount = $Services.Count
+  $MaxCols = [Math]::Max(1, [Math]::Min($Cols, $ServiceCount))
+
+  # Ctrl+C handler
+  $script:monitExit = $false
+  $cancelHandler = [ConsoleCancelEventHandler]{ param($s,$e) $e.Cancel = $true; $script:monitExit = $true }
+  [Console]::CancelKeyPress += $cancelHandler
+
+  # Per-service state: file positions + circular buffer
+  $state = @{}
+  foreach ($svc in $Services) {
+    $state[$svc] = @{
+      outPos = 0; errPos = 0
+      lines = [System.Collections.Generic.List[string]]::new()
+      colors = [System.Collections.Generic.List[ConsoleColor]]::new()
+    }
+  }
+
+  $origVis = try { [Console]::CursorVisible } catch { $true }
+  $origBg = [Console]::BackgroundColor
+
+  try {
+    try { [Console]::CursorVisible = $false } catch { }
+    Clear-Host
+
+    while (-not $script:monitExit) {
+      $w = [Console]::WindowWidth
+      $h = [Console]::WindowHeight
+      $rows = [Math]::Ceiling($ServiceCount / $MaxCols)
+      $cellW = [Math]::Max(10, [Math]::Floor($w / $MaxCols))
+      $cellH = [Math]::Max(2, [Math]::Floor(($h - 1) / $rows))
+      $contentH = $cellH - 1
+
+      # Read new log content for each service
+      foreach ($svc in $Services) {
+        $s = $state[$svc]
+
+        foreach ($stream in @(
+          @{ path = Join-Path $LogDir "$svc.out.log"; posRef = 'outPos'; color = [ConsoleColor]::Green },
+          @{ path = Join-Path $LogDir "$svc.err.log"; posRef = 'errPos'; color = [ConsoleColor]::Yellow }
+        )) {
+          try {
+            $fs = [System.IO.FileStream]::new($stream.path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $len = $fs.Length
+            $pos = $s[$stream.posRef]
+            if ($len -gt $pos) {
+              $null = $fs.Seek($pos, [System.IO.SeekOrigin]::Begin)
+              $reader = [System.IO.StreamReader]::new($fs)
+              while (-not $reader.EndOfStream) {
+                $line = $reader.ReadLine()
+                $s.lines.Add($line)
+                $s.colors.Add($stream.color)
+              }
+              $s[$stream.posRef] = $fs.Position
+              $reader.Close()
+            } elseif ($len -lt $pos) {
+              $s[$stream.posRef] = 0
+              $fs.Close()
+            } else {
+              $fs.Close()
+            }
+          } catch [System.IO.FileNotFoundException] { }
+          catch { Write-Debug "monit read $($stream.path): $_" }
+        }
+
+        # Trim buffer to avoid unbounded growth
+        if ($s.lines.Count -gt 1000) {
+          $s.lines.RemoveRange(0, $s.lines.Count - 1000)
+          $s.colors.RemoveRange(0, $s.colors.Count - 1000)
+        }
+      }
+
+      # Draw grid (iterate full rows×cols to clean unused cells)
+      for ($ri = 0; $ri -lt $rows; $ri++) {
+        for ($ci = 0; $ci -lt $MaxCols; $ci++) {
+          $i = $ri * $MaxCols + $ci
+          $svc = if ($i -lt $ServiceCount) { $Services[$i] } else { $null }
+          $x = $ci * $cellW
+          $y = $ri * $cellH
+
+          # Header
+          [Console]::SetCursorPosition($x, $y)
+          if ($svc) {
+            $header = " $svc "
+            $header = $header.PadRight($cellW - 1, '─')
+            if ($header.Length -gt $cellW) { $header = $header.Substring(0, $cellW) }
+            [Console]::ForegroundColor = 'Cyan'
+            [Console]::BackgroundColor = 'DarkBlue'
+          } else {
+            $header = ''.PadRight($cellW)
+            [Console]::ForegroundColor = 'DarkGray'
+            [Console]::BackgroundColor = $origBg
+          }
+          [Console]::Write($header)
+          [Console]::BackgroundColor = $origBg
+
+          # Content
+          $s = if ($svc) { $state[$svc] } else { $null }
+          $bufCount = if ($s) { $s.lines.Count } else { 0 }
+          $startIdx = [Math]::Max(0, $bufCount - $contentH)
+
+          for ($li = 0; $li -lt $contentH; $li++) {
+            [Console]::SetCursorPosition($x, $y + 1 + $li)
+            $bi = $startIdx + $li
+            if ($s -and $bi -lt $bufCount) {
+              $text = $s.lines[$bi]
+              if ($text.Length -gt $cellW) { $text = $text.Substring(0, $cellW - 1) + '…' }
+              [Console]::ForegroundColor = $s.colors[$bi]
+              [Console]::Write($text.PadRight($cellW))
+            } else {
+              [Console]::Write(''.PadRight($cellW))
+            }
+          }
+        }
+      }
+
+      # Status bar
+      [Console]::SetCursorPosition(0, $h - 1)
+      [Console]::ForegroundColor = 'DarkGray'
+      $status = " pp2-monit | $ServiceCount services | Ctrl+C to exit ".PadRight($w, '─')
+      if ($status.Length -gt $w) { $status = $status.Substring(0, $w) }
+      [Console]::Write($status)
+
+      Start-Sleep -Milliseconds 200
+    }
+  }
+  finally {
+    [Console]::CancelKeyPress -= $cancelHandler
+    try { [Console]::CursorVisible = $origVis } catch { }
+    [Console]::ResetColor()
+    Write-Host "pp2-monit: exited" -ForegroundColor DarkGray
+    Start-Sleep -Milliseconds 200
+    Clear-Host
+  }
 }
 
 function Show-WatchdogStatus {
