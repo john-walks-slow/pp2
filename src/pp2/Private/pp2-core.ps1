@@ -5,7 +5,7 @@ function Initialize-Pp2Context {
   param([Parameter(Mandatory = $true)][string]$ScriptRoot)
 
   $script:Root = $ScriptRoot
-  $script:ModuleRoot = Split-Path -Parent $PSScriptRoot
+  $script:ModuleRoot = $PSScriptRoot
   $script:ConfigPath = Join-Path $script:Root 'services.json'
   $script:RunDir = Join-Path $script:Root 'run'
   $script:LogDir = Join-Path $script:Root 'logs'
@@ -73,7 +73,7 @@ function Get-ServiceNames([string[]]$Name = @('all')) {
       throw "Unknown service: $ServiceName" 
     }
     if (-not (Test-EnabledService $ServiceName)) {
-      throw "Unknown service: $ServiceName"
+      throw "Service is disabled: $ServiceName"
     }
   }
   return $RequestedNames
@@ -98,9 +98,8 @@ function Open-ConfigFile {
   #>
   $Editor = $env:EDITOR
   if (-not $Editor) {
-    # Try common editors on Windows
-    $Editor = (Get-Command code.cmd -ErrorAction SilentlyContinue).Source
-    if (-not $Editor) { $Editor = (Get-Command notepad.exe -ErrorAction SilentlyContinue).Source }
+    $Editor = (Get-Command code, code.cmd, notepad.exe -ErrorAction SilentlyContinue).Source |
+      Select-Object -First 1
   }
   
   if (-not $Editor) {
@@ -388,7 +387,7 @@ function Stop-Many([string[]]$ServiceNames) {
           $script:RunDir = Join-Path $Root 'run'
           $script:LogDir = Join-Path $Root 'logs'
           # Import Stop-One and its dependencies
-          . (Join-Path $ModuleRoot 'lib/pp2-core.ps1')
+          . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
           Stop-One $ServiceName
         } -ArgumentList $_, $script:ModuleRoot, $script:Root, ($script:Config | ConvertTo-Json -Depth 10)
       }
@@ -599,7 +598,7 @@ function Start-Many([string[]]$ServiceNames, [bool]$Force) {
           $script:RunDir = Join-Path $Root 'run'
           $script:LogDir = Join-Path $Root 'logs'
           # Import Start-One and its dependencies
-          . (Join-Path $ModuleRoot 'lib/pp2-core.ps1')
+          . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
           Start-One $ServiceName $Force | Out-Null
         } -ArgumentList $_, $Force, $script:ModuleRoot, $script:Root, ($script:Config | ConvertTo-Json -Depth 10)
       }

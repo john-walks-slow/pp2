@@ -1,13 +1,25 @@
+# Build output
+output/
+src/pp2/_publish/
+src/pp2/_stage/
+
 # PID files
 *.pid
 run/
+src/pp2/run/
 
 # Logs
 logs/
 *.log
+src/pp2/logs/
 
-# Test backups
+# Test artifacts
 *.test-backup
+test-results.xml
+coverage.xml
+
+# NuGet packages
+*.nupkg
 
 # Node modules
 node_modules/
@@ -22,7 +34,6 @@ venv/
 ENV/
 
 # Editor
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -31,9 +42,6 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-
-# NuGet packages
-*.nupkg
 
 # Secrets and credentials
 .env
@@ -44,3 +52,4 @@ credentials.json
 
 # Service configuration (local)
 services.json
+src/pp2/services.json

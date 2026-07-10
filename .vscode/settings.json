@@ -1,0 +1,11 @@
+{
+    "powershell.codeFormatting.preset": "Allman",
+    "powershell.codeFormatting.autoCorrectAliases": true,
+    "powershell.codeFormatting.avoidSemicolonsAsTerminators": true,
+    "powershell.codeFormatting.useConstantValues": true,
+    "powershell.codeFormatting.pipelineIndentationStyle": "IncreaseIndentationAfterEveryPipeline",
+    "powershell.integratedConsole.suppressStartupBanner": true,
+    "files.defaultLanguage": "powershell",
+    "editor.formatOnSave": true,
+    "editor.renderWhitespace": "all"
+}

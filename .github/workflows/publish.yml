@@ -14,9 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install PSScriptAnalyzer
+      - name: Lint
         shell: pwsh
-        run: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+        run: .\build.ps1 -Lint
+
+      - name: Test
+        shell: pwsh
+        run: .\build.ps1 -Test
 
       - name: Build and Publish
         shell: pwsh
@@ -24,4 +28,4 @@ jobs:
           NUGET_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
         run: |
           $Version = "${{ github.ref_name }}" -replace '^v', ''
-          .\build.ps1 -Version $Version -Publish -NuGetApiKey $env:NUGET_API_KEY
+          .\build.ps1 -Version $Version -Build -Publish -NuGetApiKey $env:NUGET_API_KEY

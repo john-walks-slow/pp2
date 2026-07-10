@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path (Split-Path -Parent $PSCommandPath) 'pp2-core.ps1')
+. (Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'Private\pp2-core.ps1')
 Initialize-Pp2Context -ScriptRoot $Root
 $Service = Get-ServiceConfig $Name
 

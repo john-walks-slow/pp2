@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint
+        shell: pwsh
+        run: .\build.ps1 -Lint
+
+      - name: Test
+        shell: pwsh
+        run: .\build.ps1 -Test
+
+      - name: Build
+        shell: pwsh
+        run: .\build.ps1 -Build

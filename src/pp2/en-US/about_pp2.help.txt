@@ -1,0 +1,33 @@
+TOPIC
+    about_pp2
+
+SHORT DESCRIPTION
+    PowerShell Process Manager - manage background processes with dependency handling,
+    auto-restart, and monitoring.
+
+LONG DESCRIPTION
+    pp2 is a PowerShell-based service manager inspired by pm2. It manages background
+    processes defined in a services.json configuration file.
+
+    Windows Only: pp2 uses Windows-specific APIs (taskkill, NetTCPConnection,
+    Scheduled Tasks). It is supported on Windows with PowerShell 7+.
+
+    CONFIGURATION
+        Services are defined in services.json under the pp2 config directory.
+        Default: $HOME/.pp2 (override with PP2_HOME environment variable).
+
+        See https://github.com/john-walks-slow/pp2#readme for full configuration reference.
+
+    COMMANDS
+        pp2 status [name]              Show service status
+        pp2 start [name]               Start services
+        pp2 stop [name]                Stop services
+        pp2 restart [name]             Restart services
+        pp2 logs <name>                View service logs
+        pp2 monit [name]               Multi-pane log viewer (Windows Terminal)
+        pp2 watchdog-start             Start auto-restart monitor
+        pp2 watchdog-stop              Stop auto-restart monitor
+        pp2 startup-install            Add to Windows startup
+
+SEE ALSO
+    https://github.com/john-walks-slow/pp2

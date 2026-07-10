@@ -1,25 +1,4 @@
 #Requires -Version 7.0
-<#
-.SYNOPSIS
-    Install pp2 module locally
-
-.DESCRIPTION
-    Installs the pp2 module by copying source files to the PowerShell module path.
-    Works without needing to publish to PowerShell Gallery.
-
-.EXAMPLE
-    .\install.ps1
-    Install pp2 module
-
-.EXAMPLE
-    .\install.ps1 -Force
-    Force reinstall
-
-.EXAMPLE
-    .\install.ps1 -Uninstall
-    Remove pp2 module
-#>
-
 param(
     [switch]$Uninstall,
     [switch]$Force
@@ -73,9 +52,16 @@ function Install-ModuleLocally {
         Remove-Item $TargetPath -Recurse -Force
     }
     New-Item -ItemType Directory -Path $TargetPath -Force | Out-Null
-    Get-ChildItem -Path $SourcePath | Copy-Item -Destination $TargetPath -Recurse -Force
 
-    # Verify installation
+    # Copy source, excluding dev-only files
+    $ExcludeFiles = @(
+        'PSScriptAnalyzerSettings.psd1',
+        'services.example.json'
+    )
+    Get-ChildItem -Path $SourcePath -Exclude $ExcludeFiles | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $TargetPath -Recurse -Force
+    }
+
     $Installed = Get-Module -ListAvailable -Name $ModuleName -ErrorAction SilentlyContinue
     if ($Installed) {
         Write-Host ""
