@@ -1,3 +1,11 @@
+# Fall back to the legacy ThreadJob module name on PowerShell 7.4 and
+# earlier, which still ship it under that name. PowerShell 7.6 renamed it
+# to Microsoft.PowerShell.ThreadJob and now warns about the old one.
+if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.ThreadJob) -and
+    (Get-Module -ListAvailable -Name ThreadJob)) {
+    Import-Module -Name ThreadJob -ErrorAction Stop
+}
+
 $script:Pp2Root = if ($env:PP2_HOME) { $env:PP2_HOME } else { Join-Path $HOME '.pp2' }
 
 # Import private (internal) functions

@@ -56,19 +56,18 @@ function Step-Test {
     Write-Host "[Test] Running Pester tests..." -ForegroundColor Cyan
     Resolve-BuildDependency -Name Pester -MinimumVersion '5.5.0'
 
-    $TestDir = Join-Path $PSScriptRoot 'tests'
-    $Config = New-PesterConfiguration
-    $Config.Run.Path = $TestDir
-    $Config.Run.PassThru = $true
-    $Config.TestResult.Enabled = $true
-    $Config.TestResult.OutputPath = Join-Path $OutputDir 'test-results.xml'
-    $Config.CodeCoverage.Enabled = $true
-    $Config.CodeCoverage.OutputPath = Join-Path $OutputDir 'coverage.xml'
-    $Config.CodeCoverage.Path = $ModuleRoot
+    # The Test phase runs against the live source. Invoke the wrapper so the
+    # same script (and the same -Scope, when used) drives unit and integration
+    # tests on a developer's machine and on CI.
+    $Wrapper = Join-Path $PSScriptRoot 'tests\run-tests.ps1'
+    if (-not (Test-Path $Wrapper)) {
+        throw "Test wrapper not found: $Wrapper"
+    }
+    & $Wrapper -Scope All
+    if ($LASTEXITCODE -ne 0) { throw "Pester reported failures (exit $LASTEXITCODE)." }
 
-    $Result = Invoke-Pester -Configuration $Config
-    if ($Result.FailedCount -gt 0) { throw "$($Result.FailedCount) test(s) failed." }
-    Write-Host "  All $($Result.PassedCount) tests passed." -ForegroundColor Green
+    $Result = Get-ChildItem (Join-Path $OutputDir 'test-results.xml') -EA SilentlyContinue
+    Write-Host "  All tests passed." -ForegroundColor Green
 }
 
 function Step-Build {

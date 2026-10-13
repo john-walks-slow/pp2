@@ -1,12 +1,15 @@
 param(
   [int]$Interval = 60,
   [Parameter(Mandatory = $true)]
-  [string]$Root
+  [string]$Root,
+  [string]$Config
 )
 
 $ErrorActionPreference = 'Continue'
 . (Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'Private\pp2-core.ps1')
 Initialize-Pp2Context -ScriptRoot $Root
+if ($Config) { $script:ConfigPath = $Config }
+Read-Pp2Config
 
 $DefaultInterval = [int](Get-Setting 'watchdogInterval' 60)
 if (-not $Interval) { $Interval = $DefaultInterval }
@@ -21,15 +24,19 @@ function Write-WatchdogLog([string]$Message) {
 
 function Invoke-ServiceRestart([string]$ServiceName) {
   $ModuleManifestPath = Join-Path $ModuleRoot 'pp2.psd1'
-  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $Root); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 internal-start $(ConvertTo-PwshLiteral $ServiceName) }"
+  # PP2_HOME and -Config are both propagated so a service managed from a
+  # non-default root or explicit config file restarts against the same state.
+  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $Root); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 internal-start $(ConvertTo-PwshLiteral $ServiceName) -Config $(ConvertTo-PwshLiteral $script:ConfigPath) }"
   $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $Command) -PassThru -WindowStyle Hidden
   $ChildProcesses[$Process.Id] = $ServiceName
 
-  Start-Sleep -Seconds 3
-  $Process.WaitForExit(5000)
-  if (-not $Process.HasExited) {
+  # Wait for the restart to actually finish instead of assuming a fixed
+  # duration: a cold pwsh start plus module import can take tens of seconds.
+  # Killing too early leaves the PID file stale and the service down.
+  $TimeoutSec = [int](Get-Setting 'restartTimeout' 120)
+  if (-not $Process.WaitForExit($TimeoutSec * 1000)) {
     $Process.Kill()
-    Write-WatchdogLog "WARNING: restart process pid=$($Process.Id) didn't exit, killed"
+    Write-WatchdogLog "WARNING: restart process pid=$($Process.Id) didn't exit within ${TimeoutSec}s, killed"
   }
   $ChildProcesses.Remove($Process.Id)
 }
@@ -92,11 +99,20 @@ while ($true) {
     $RetryPath = Get-RetryPath $ServiceName
 
     if ($Process) {
-      # Only clear retry counter if service has been stable for a while
-      # This prevents retry counter being cleared on immediate restart success
-      # which would cause infinite restarts
+      # Healthy. Once it has held up through the grace period, forget the
+      # crash history so a later, unrelated crash gets a fresh retry budget.
+      if (Test-ServiceStability $ServiceName) {
+        if (Test-Path (Get-RetryPath $ServiceName)) {
+          Write-WatchdogLog "$ServiceName stable, resetting retry counter"
+        }
+        Reset-RetryState $ServiceName
+      }
       continue
     }
+
+    # Not running: drop the stability timer so the next successful start has
+    # to earn its grace period again.
+    Clear-ServiceStability $ServiceName
 
     $Retries = if (Test-Path $RetryPath) { [int](Get-Content $RetryPath -Raw) } else { 0 }
     $MaxRetries = [int](Get-ServiceProperty $Service 'maxRetries' 3)
@@ -108,10 +124,13 @@ while ($true) {
       continue
     }
 
+    # Back off before the first retry, then exponentially: 4s, 8s, 16s ... capped at 2min.
     $RetryDelay = [math]::Min(4 * [math]::Pow(2, $Retries), 120)
     Write-WatchdogLog "$ServiceName crashed, waiting $RetryDelay s before retry $($Retries + 1)/$MaxRetries"
     Start-Sleep -Seconds $RetryDelay
 
+    # Record the attempt before starting it: Start-One must not clear the
+    # counter, otherwise maxRetries can never be reached.
     Set-Content -Path $RetryPath -Value ($Retries + 1) -NoNewline
     Write-WatchdogLog "auto-restarting $ServiceName..."
     Invoke-ServiceRestart $ServiceName
@@ -123,16 +142,14 @@ while ($true) {
 
     $NewPid = [int](Get-Content $PidPath -Raw)
     $NewProcess = Get-Process -Id $NewPid -ErrorAction SilentlyContinue
-    if ($NewProcess -and $NewPid -ne $RecordedPid) {
-      # Keep retry file for tracking, don't clear on immediate success
-      # Retry counter will be cleared when maxRetries is reached
+    if (-not $NewProcess) {
+      Write-WatchdogLog "restart failed for $ServiceName (no process found for pid=$NewPid)"
+    }
+    elseif ($NewPid -ne $RecordedPid) {
       Write-WatchdogLog "restart succeeded for $ServiceName new_pid=$NewPid"
     }
-    elseif ($NewPid -eq $RecordedPid) {
-      Write-WatchdogLog "WARNING: PID file not updated after restart (still shows dead pid=$RecordedPid)"
-    }
     else {
-      Write-WatchdogLog "restart failed for $ServiceName (no process found for pid=$NewPid)"
+      Write-WatchdogLog "WARNING: PID file not updated after restart (still shows dead pid=$RecordedPid)"
     }
   }
 

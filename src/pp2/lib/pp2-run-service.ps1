@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)]
   [string]$Name,
   [Parameter(Mandatory = $true)]
@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'Private\pp2-core.ps1')
 Initialize-Pp2Context -ScriptRoot $Root
+Read-Pp2Config
 $Service = Get-ServiceConfig $Name
 
 if ((Get-ServiceProperty $Service 'inheritEnv' $true) -eq $false) {

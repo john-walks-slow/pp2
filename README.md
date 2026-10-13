@@ -61,7 +61,16 @@ pp2 startup-install
 
 ## Configuration Example
 
-Define services in `services.json` under the pp2 config directory. (Default: `$HOME/.pp2`, override with `PP2_HOME`)
+Define services in `services.json` under the pp2 config directory.
+
+| Location                | Resolved as                                    |
+| ----------------------- | ---------------------------------------------- |
+| `$PP2_HOME` (env var)   | used verbatim if set                            |
+| Default (no env var)    | `$HOME/.pp2` on Windows, Linux, and macOS       |
+
+Every `pp2` invocation re-reads `PP2_HOME`, so changing it between commands
+takes effect without re-importing the module. `-Config <path>` overrides
+`services.json` for a single command.
 
 ```json
 {
@@ -111,22 +120,23 @@ Define services in `services.json` under the pp2 config directory. (Default: `$H
 
 The `shell` option controls command execution:
 
-| Mode           | `shell` | Execution Method    | Best For                              |
-| -------------- | ------- | ------------------- | ------------------------------------- |
-| **Direct**     | `false` | `& $command $args`  | Native executables; precise args      |
-| **Shell**      | `true`  | `Invoke-Expression` | CLI tools; shell features needed      |
+| Mode           | `shell` | Execution Method          | Best For                              |
+| -------------- | ------- | ------------------------- | ------------------------------------- |
+| **Direct**     | `false` | `& $command @arguments`   | Native executables; precise args      |
+| **Shell**      | `true`  | `pwsh -Command $fullLine` | CLI tools; shell features needed      |
 
 **Direct mode (`shell: false`)** - Default:
 
-- Each argument passed as separate token, boundaries preserved
-- No shell features (no pipes, redirects, wildcards, PATH)
-- Recommended for direct executables
+- Each argument is passed as a separate token; boundaries are preserved
+- No shell features (no pipes, redirects, wildcards, PATH lookup)
+- Recommended for direct executables and Node.js scripts
 
 **Shell mode (`shell: true`)**:
 
-- Command concatenated as string, executed via pwsh
-- Arguments properly quoted and escaped
-- Recommended for CLI tools and package runners (`npx`, `uvx`, `pipx`)
+- The command and its arguments are joined into a single string
+- Executed via `pwsh -NoProfile -NonInteractive -Command ...`
+- Recommended for CLI tools and package runners (`npx`, `uvx`, `pipx`, `dotnet tool`)
+- The command is logged to `<service>.out.log` before execution so the actual invocation is auditable
 
 ### Ephemeral Services (Launcher Pattern)
 
@@ -174,13 +184,16 @@ Configure in `services.json` under `settings`:
 }
 ```
 
-| Field               | Type   | Default | Description                              |
-| ------------------- | ------ | ------- | ---------------------------------------- |
-| `watchdogInterval`  | number | 60      | Watchdog check interval (seconds)        |
-| `portCheckTimeout`  | number | 200     | Port check timeout (milliseconds)        |
-| `startupVerifyWait` | number | 2500    | Startup verification wait (ms)           |
-| `shutdownTimeout`   | number | 5000    | Shutdown exit timeout (milliseconds)     |
-| `shutdownWaitDelay` | number | 2000    | Wait after shutdown command (ms)         |
+| Field                | Type   | Default | Description                                                          |
+| -------------------- | ------ | ------- | -------------------------------------------------------------------- |
+| `watchdogInterval`   | number | 60      | Watchdog check interval (seconds)                                    |
+| `portCheckTimeout`   | number | 200     | Port check timeout (milliseconds)                                    |
+| `startupVerifyWait`  | number | 20000   | How long to wait for a service to start before reporting a failure (ms) |
+| `startupSettleWait`  | number | 3000    | After the launch script's banner, wait this long for a crash (ms)   |
+| `shutdownTimeout`    | number | 5000    | Shutdown exit timeout (milliseconds)                                 |
+| `shutdownWaitDelay`  | number | 2000    | Wait after shutdown command (ms)                                     |
+| `healthCheckGrace`   | number | 30      | Seconds a service must be up before its retry counter is cleared    |
+| `restartTimeout`     | number | 120     | Max seconds the watchdog waits for its own restart subprocess        |
 
 ## Commands Reference
 
@@ -268,7 +281,32 @@ Services with `dependsOn` start in correct order. Stop operations use reverse de
 - Check `logs/<service>.err.log`
 - Verify port not occupied: `netstat -ano | findstr :<port>`
 
+**Service starts then disappears from `pp2 status`:**
+
+- A bad `command`, missing binary, or bad arguments cause the launch script
+  to exit before reaching the user's program. The check is the "exited
+  immediately" warning in stdout; the service then has no PID file.
+- Increase `startupVerifyWait` and `startupSettleWait` if a healthy service
+  fails the startup check on a slow machine (cold start of `pwsh` can take
+  10-15s on Windows).
+
 **Service won't auto-restart:**
 
 - Run `pp2 watchdog-status` to check status
 - Start manually: `pp2 watchdog-start`
+- After `maxRetries` the watchdog gives up and leaves the service stopped.
+  Fix the underlying crash, then run `pp2 start <name>` again.
+
+**`pp2` is not found after install:**
+
+- `Install-Module pp2 -Scope CurrentUser` requires PowerShell 7+ and
+  PowerShellGet 2.x. Check `$PSVersionTable.PSVersion` and run
+  `Install-Module -Name PowerShellGet -Force` if needed.
+- If you installed with `-Scope AllUsers`, restart the shell so the new
+  `PSModulePath` is picked up.
+
+**`PP2_HOME` is ignored between commands:**
+
+- This is fixed in 1.0.0: every command re-reads `PP2_HOME`. If you still
+  see the previous home, check that you are not running an older copy of
+  the module (`Get-Module pp2 | Select-Object Version,Path`).

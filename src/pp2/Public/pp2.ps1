@@ -21,12 +21,15 @@ function pp2 {
 
     $ErrorActionPreference = 'Stop'
 
-    Initialize-Pp2Context -ScriptRoot $script:Pp2Root
+    # Resolve the state root per invocation so PP2_HOME changes take effect
+    # without re-importing the module.
+    Initialize-Pp2Context -ScriptRoot (Get-Pp2Root)
 
     if ($Config) {
-        $script:ConfigPath = $Config
-        $script:Config = Get-Content $script:ConfigPath -Raw | ConvertFrom-Json
+        if (-not (Test-Path $Config)) { throw "Config file not found: $Config" }
+        $script:ConfigPath = (Resolve-Path $Config).Path
     }
+    Read-Pp2Config
 
     switch ($Action) {
         'help' {
@@ -83,7 +86,9 @@ Examples:
             Start-Many (Get-ServiceNames $Name) $Force.IsPresent
         }
         'internal-start' {
-            Start-Many (Get-ServiceNames $Name) $true
+            # Watchdog-driven restart: preserve the crash-retry counter so that
+            # maxRetries is actually reachable.
+            Start-Many (Get-ServiceNames $Name) $true $true
         }
         'stop' { Stop-Many (Get-ServiceNames $Name) }
         'restart' {
@@ -103,7 +108,7 @@ Examples:
         'watchdog-start' { Start-WatchdogProcess }
         'watchdog-stop' { Stop-Watchdog }
         'watchdog-status' { Show-WatchdogStatus }
-        'startup-install' { Install-StartupTask (Join-Path $PSScriptRoot 'pp2.psd1') $script:Pp2Root }
+        'startup-install' { Install-StartupTask (Join-Path $script:ModuleRoot 'pp2.psd1') (Get-Pp2Root) $script:ConfigPath }
         'startup-uninstall' { Uninstall-StartupTask }
     }
 }

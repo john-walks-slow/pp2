@@ -54,7 +54,15 @@ pp2 startup-install
 
 ## 配置示例
 
-在 pp2 配置目录的 `services.json` 中定义服务。（默认位置：`$HOME/.pp2`，可用 `PP2_HOME` 覆盖）
+在 pp2 配置目录的 `services.json` 中定义服务。
+
+| 路径                       | 解析方式                                       |
+| -------------------------- | ---------------------------------------------- |
+| `$PP2_HOME` 环境变量       | 直接使用                                       |
+| 默认（无环境变量）         | Windows / Linux / macOS 上均为 `$HOME/.pp2`    |
+
+每次 `pp2` 调用都会重新读取 `PP2_HOME`，因此切换环境变量无需重新导入模块。
+`-Config <path>` 可在单次命令中临时使用其它 `services.json`。
 
 ```json
 {
@@ -103,10 +111,10 @@ pp2 startup-install
 
 `shell` 选项控制命令的执行方式：
 
-| 模式           | `shell` | 执行方法            | 适用场景                              |
-| -------------- | ------- | ------------------- | ------------------------------------- |
-| **直接执行**   | `false` | `& $command $args`  | 原生可执行文件；精确参数传递          |
-| **Shell 执行** | `true`  | `Invoke-Expression` | CLI 工具；需要 shell 特性 |
+| 模式           | `shell` | 执行方法              | 适用场景                              |
+| -------------- | ------- | --------------------- | ------------------------------------- |
+| **直接执行**   | `false` | `& $command @arguments` | 原生可执行文件；精确参数传递          |
+| **Shell 执行** | `true`  | `pwsh -Command $fullLine` | CLI 工具；需要 shell 特性            |
 
 **直接模式 (`shell: false`)** - 默认：
 
@@ -116,9 +124,9 @@ pp2 startup-install
 
 **Shell 模式 (`shell: true`)**：
 
-- 命令拼接成字符串后，通过 pwsh 执行
-- 参数会被适当引号包裹和转义
-- 建议用于 CLI 工具和 `npx`、`uvx`、`pipx` 等包运行器
+- 命令与参数拼成单行字符串，通过 `pwsh -NoProfile -NonInteractive -Command` 执行
+- 适合 CLI 工具与包运行器（`npx`、`uvx`、`pipx`、`dotnet tool`）
+- 命令执行前会写入 `<service>.out.log`，便于审计实际调用
 
 ### Ephemeral 服务（启动器模式）
 
@@ -167,12 +175,16 @@ pp2 startup-install
 }
 ```
 
-| 字段                | 类型   | 默认值 | 说明                     |
-| ------------------- | ------ | ------ | ------------------------ |
-| `watchdogInterval`  | number | 60     | Watchdog 检查间隔（秒）  |
-| `portCheckTimeout`  | number | 200    | 端口检查超时（毫秒）     |
-| `startupVerifyWait` | number | 2500   | 启动验证等待时间（毫秒） |
-| `shutdownTimeout`   | number | 5000   | 关闭进程退出超时（毫秒） |
+| 字段                | 类型   | 默认值 | 说明                                                       |
+| ------------------- | ------ | ------ | ---------------------------------------------------------- |
+| `watchdogInterval`  | number | 60     | Watchdog 检查间隔（秒）                                    |
+| `portCheckTimeout`  | number | 200    | 端口检查超时（毫秒）                                       |
+| `startupVerifyWait` | number | 20000  | 启动检测最长等待时间（毫秒），超时判定为已启动             |
+| `startupSettleWait` | number | 3000   | 启动脚本写完横幅后，再等多久确认进程未立即退出（毫秒）     |
+| `shutdownTimeout`   | number | 5000   | 关闭进程退出超时（毫秒）                                   |
+| `shutdownWaitDelay` | number | 2000   | 执行 shutdownCommand 后再等待（毫秒）                      |
+| `healthCheckGrace`  | number | 30     | 判定服务稳定、清空重启计数前需连续存活的秒数               |
+| `restartTimeout`    | number | 120    | Watchdog 等待自身重启子进程的最大秒数                      |
 
 ## 命令参考
 

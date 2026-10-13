@@ -1,50 +1,77 @@
-Set-StrictMode -Version Latest
-$script:IsWindows = $env:OS -eq 'Windows_NT'
+﻿Set-StrictMode -Version Latest
+
+function Get-Pp2Root {
+  <#
+  .SYNOPSIS
+    Resolve the pp2 state root at call time.
+
+  .DESCRIPTION
+    Read per invocation instead of at import time so that changing PP2_HOME
+    takes effect without re-importing the module.
+  #>
+  if ($env:PP2_HOME) { return $env:PP2_HOME }
+  return (Join-Path $HOME '.pp2')
+}
 
 function Initialize-Pp2Context {
   param([Parameter(Mandatory = $true)][string]$ScriptRoot)
 
   $script:Root = $ScriptRoot
-  $script:ModuleRoot = $PSScriptRoot
+  $script:ModuleRoot = Split-Path -Parent $PSScriptRoot
   $script:ConfigPath = Join-Path $script:Root 'services.json'
   $script:RunDir = Join-Path $script:Root 'run'
   $script:LogDir = Join-Path $script:Root 'logs'
   $script:TaskName = 'pp2 Startup'
+  $script:ConfigLoaded = $false
+  $script:Config = $null
 
   New-Item -ItemType Directory -Force -Path $script:RunDir, $script:LogDir | Out-Null
+}
 
-  # Auto-create default services.json if not exists
-  if (-not (Test-Path $script:ConfigPath)) {
-    # Create minimal valid config structure
-    $DefaultJson = '{"settings":{},"services":{}}'
-    Set-Content -Path $script:ConfigPath -Value $DefaultJson -Encoding UTF8
-    $script:Config = $DefaultJson | ConvertFrom-Json
-  } else {
-    # Handle empty file gracefully
-    $ConfigContent = (Get-Content $script:ConfigPath -Raw -ErrorAction SilentlyContinue).Trim()
-    if ([string]::IsNullOrWhiteSpace($ConfigContent)) {
-      $script:Config = '{"settings":{},"services":{}}' | ConvertFrom-Json
-    } else {
-      $script:Config = $ConfigContent | ConvertFrom-Json
-    }
+function Read-Pp2Config {
+  <#
+  .SYNOPSIS
+    Load and normalize services.json into $script:Config.
+
+  .DESCRIPTION
+    Creates a default config when absent, rejects malformed JSON with an
+    actionable message, and guarantees the 'settings'/'services' sections
+    exist as PSCustomObject so property access is safe under StrictMode.
+  #>
+  $Path = $script:ConfigPath
+
+  if (-not (Test-Path $Path)) {
+    Set-Content -Path $Path -Value '{"settings":{},"services":{}}' -Encoding UTF8
   }
 
-  # Ensure config has required structure (handle edge cases from JSON parsing)
-  if (-not $script:Config.PSObject.Properties['settings']) {
-    $script:Config | Add-Member -MemberType NoteProperty -Name 'settings' -Value ([PSCustomObject]@{}) -Force
+  $Raw = Get-Content $Path -Raw -ErrorAction Stop
+  if ([string]::IsNullOrWhiteSpace($Raw)) { $Raw = '{"settings":{},"services":{}}' }
+
+  try {
+    $script:Config = $Raw | ConvertFrom-Json -ErrorAction Stop
   }
-  if (-not $script:Config.PSObject.Properties['services']) {
-    $script:Config | Add-Member -MemberType NoteProperty -Name 'services' -Value ([PSCustomObject]@{}) -Force
+  catch {
+    throw "Invalid JSON in '$Path': $($_.Exception.Message)"
   }
-  # Ensure services is PSCustomObject not Hashtable
-  if ($script:Config.services -is [System.Collections.Hashtable]) {
-    $script:Config.services = [PSCustomObject]$script:Config.services
+
+  if ($null -eq $script:Config) { $script:Config = [PSCustomObject]@{} }
+
+  foreach ($Section in @('settings', 'services')) {
+    $Value = $script:Config.PSObject.Properties[$Section]
+    if ($Value -and $Value.Value -is [PSCustomObject]) { continue }
+    $script:Config | Add-Member -MemberType NoteProperty -Name $Section -Value ([PSCustomObject]@{}) -Force
   }
+
+  $script:ConfigLoaded = $true
+}
+
+function Initialize-Pp2Config {
+  if (-not $script:ConfigLoaded) { Read-Pp2Config }
 }
 
 function Get-Setting([string]$Name, $Default) {
+  Initialize-Pp2Config
   $Settings = $script:Config.settings
-  if (-not $Settings) { return $Default }
   $Property = $Settings.PSObject.Properties[$Name]
   if ($Property) { return $Property.Value }
   return $Default
@@ -56,8 +83,9 @@ function Test-EnabledService([string]$ServiceName) {
 }
 
 function Get-ServiceNames([string[]]$Name = @('all')) {
+  Initialize-Pp2Config
   $ServicesObj = $script:Config.services
-  
+
   $RequestedNames = @($Name | Where-Object { $_ -ne 'all' })
   if ($RequestedNames.Count -eq 0) {
     if ($null -eq $ServicesObj) { return @() }
@@ -80,12 +108,14 @@ function Get-ServiceNames([string[]]$Name = @('all')) {
 }
 
 function Get-ServiceConfig([string]$ServiceName) {
+  Initialize-Pp2Config
   $Property = $script:Config.services.PSObject.Properties[$ServiceName]
   if (-not $Property) { throw "Unknown service: $ServiceName" }
   return $Property.Value
 }
 
-function Get-ServiceProperty([pscustomobject]$Service, [string]$PropertyName, $Default = $null) {
+function Get-ServiceProperty($Service, [string]$PropertyName, $Default = $null) {
+  if ($null -eq $Service) { return $Default }
   $Property = $Service.PSObject.Properties[$PropertyName]
   if ($Property) { return $Property.Value }
   return $Default
@@ -130,11 +160,12 @@ function Get-StatePath([string]$ServiceName, [string]$Kind) { Join-Path $RunDir 
 function Get-PidPath([string]$ServiceName) { Get-StatePath $ServiceName 'pid' }
 function Get-ElevatedPath([string]$ServiceName) { Get-StatePath $ServiceName 'elevated' }
 function Get-RetryPath([string]$ServiceName) { Get-StatePath $ServiceName 'retry' }
+function Get-HealthyPath([string]$ServiceName) { Get-StatePath $ServiceName 'healthy' }
 function Get-OutLog([string]$ServiceName) { Join-Path $LogDir "$ServiceName.out.log" }
 function Get-ErrLog([string]$ServiceName) { Join-Path $LogDir "$ServiceName.err.log" }
 
 function Remove-ServiceState([string]$ServiceName) {
-  'pid', 'elevated', 'retry' | ForEach-Object {
+  'pid', 'elevated', 'retry', 'healthy' | ForEach-Object {
     Remove-Item (Get-StatePath $ServiceName $_) -ErrorAction SilentlyContinue
   }
 }
@@ -157,6 +188,117 @@ function Get-RecordedProcess([string]$ServiceName) {
   }
 
   return Get-Process -Id $RecordedPid -ErrorAction SilentlyContinue
+}
+
+function Format-Duration([TimeSpan]$Duration) {
+  # Parentheses matter: without them the cast binds to the whole argument
+  # array, and "{0}m {1}s" -f [int]$A, [int]$B rounds both values together.
+  $Days = [int]$Duration.Days
+  $Hours = [int]$Duration.Hours
+  $Minutes = [int]$Duration.Minutes
+  $Seconds = [int]$Duration.Seconds
+  $TotalHours = [int][Math]::Floor($Duration.TotalHours)
+  $TotalMinutes = [int][Math]::Floor($Duration.TotalMinutes)
+
+  if ($Duration.TotalDays -ge 1) { return "${Days}d ${Hours}h" }
+  if ($Duration.TotalHours -ge 1) { return "${TotalHours}h ${Minutes}m" }
+  return "${TotalMinutes}m ${Seconds}s"
+}
+
+function Get-ServiceUptime([string]$ServiceName, $Process) {
+  $PidPath = Get-PidPath $ServiceName
+  if (-not $Process -or -not (Test-Path $PidPath)) { return '-' }
+  return Format-Duration ((Get-Date) - (Get-Item $PidPath).LastWriteTime)
+}
+
+function Reset-RetryState([string]$ServiceName) {
+  Remove-Item (Get-RetryPath $ServiceName) -ErrorAction SilentlyContinue
+}
+
+function Get-LaunchLogLength([string]$ServiceName) {
+  $Path = Get-OutLog $ServiceName
+  if (-not (Test-Path $Path)) { return 0 }
+  return (Get-Item $Path).Length
+}
+
+function Wait-ServiceStartup {
+  <#
+  .SYNOPSIS
+    Decide whether a just-launched service is actually up.
+
+  .DESCRIPTION
+    The tracked PID is the launch script, which has to boot PowerShell before
+    running anything, so on a cold start nothing observable happens for several
+    seconds. A fixed wait either reports success for a service that dies
+    immediately, or slows every healthy start.
+
+    Wait for the launch script's banner (it appends the command it is about to
+    run) and then poll for the child to either still be running or to have
+    crashed. A service that runs the command and stays up will keep its
+    process alive past the polling deadline; one that errors out (mistyped
+    binary, bad arguments) will return to "process not found" within a second
+    or two. The timeout caps the worst case, so a healthy but slow service
+    falls through to "running" rather than hanging the user.
+
+    Returns $true when the process exited (start failed).
+  #>
+  param([string]$ServiceName, [int]$ProcessId)
+
+  $TimeoutMs = [int](Get-Setting 'startupVerifyWait' 20000)
+  $StartLog = Get-LaunchLogLength $ServiceName
+  $Deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+  $BannerSeen = $false
+  $SettleDeadline = $null
+
+  while ($true) {
+    $Alive = [bool](Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+    $HasBanner = (Get-LaunchLogLength $ServiceName) -gt $StartLog
+
+    if (-not $Alive) { return $true }
+    if ($HasBanner -and -not $BannerSeen) {
+      # The launch script has finished booting and is running the user's
+      # command. Give it a brief moment to crash (e.g. bad binary) before
+      # declaring the service healthy.
+      $BannerSeen = $true
+      $SettleDeadline = (Get-Date).AddMilliseconds(3000)
+    }
+    if ($BannerSeen -and (Get-Date) -ge $SettleDeadline) { return $false }
+    if ((Get-Date) -ge $Deadline) { return $false }
+
+    Start-Sleep -Milliseconds 100
+  }
+}
+
+function Test-ServiceStability([string]$ServiceName) {
+  <#
+  .SYNOPSIS
+    Track how long the watchdog has observed a service alive.
+
+  .DESCRIPTION
+    Returns $true once the service has been seen alive continuously for at
+    least healthCheckGrace seconds, which is the signal that its crash history
+    can be forgotten. The timer is anchored on the first healthy observation
+    rather than the PID file timestamp: a launched process may still be
+    starting up (or have silently died) while its PID file already looks old.
+  #>
+  $HealthyPath = Get-HealthyPath $ServiceName
+  $Grace = [int](Get-Setting 'healthCheckGrace' 30)
+  $Now = [DateTime]::UtcNow
+
+  if (-not (Test-Path $HealthyPath)) {
+    Set-Content -Path $HealthyPath -Value $Now.ToString('o') -NoNewline
+    return $false
+  }
+
+  $Since = [DateTime]::Parse(
+    (Get-Content $HealthyPath -Raw).Trim(),
+    [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::RoundtripKind)
+  return ($Now - $Since).TotalSeconds -ge $Grace
+}
+
+function Clear-ServiceStability([string]$ServiceName) {
+  Remove-Item (Get-HealthyPath $ServiceName) -ErrorAction SilentlyContinue
 }
 
 function Test-Port([int]$Port, [int]$TimeoutMs) {
@@ -259,9 +401,10 @@ function Get-DependencyLayers([string[]]$ServiceNames, [switch]$Reverse) {
   $ServiceNames = @($ServiceNames)  # Ensure array
   $IsReverse = $Reverse.IsPresent
   if ($ServiceNames.Count -eq 0) { return @() }
-  if ($ServiceNames.Count -eq 1) { return @(@($ServiceNames)) }
+  # Comma keeps the single service wrapped in its layer; without it the caller
+  # receives a bare string and indexing yields characters, not services.
+  if ($ServiceNames.Count -eq 1) { return , @($ServiceNames) }
 
-  $ServicesObj = $script:Config.services
   $DependsOn = @{}  # Service -> its dependencies
   $DependentsOf = @{}  # Service -> services that depend on it
   
@@ -282,37 +425,39 @@ function Get-DependencyLayers([string[]]$ServiceNames, [switch]$Reverse) {
     }
   }
 
-  # Build layers using topological sort
+  # Build layers by repeatedly taking every service whose prerequisites are
+  # already placed. Each pass peels off at least one service, so independent
+  # services land in the same layer rather than one per pass.
   $Layers = @()
   $Remaining = @($ServiceNames)
-  
+
   while ($Remaining.Count -gt 0) {
-    # Find services with no unresolved dependencies (or no dependents for reverse)
     $Layer = @()
-    $PrevLayer = if ($Layers.Count -gt 0) { @($Layers[-1]) } else { @() }
     foreach ($ServiceName in @($Remaining)) {
       if ($IsReverse) {
-        # For stop: no dependents remaining in this batch
-        $UnresolvedDependents = @(@($DependentsOf[$ServiceName]) | Where-Object { $_ -in $Remaining -and $_ -notin $PrevLayer })
-        if ($UnresolvedDependents.Count -eq 0) { $Layer += $ServiceName }
+        $Unresolved = @(@($DependentsOf[$ServiceName]) | Where-Object { $_ -in $Remaining })
       } else {
-        # For start: no dependencies remaining in this batch
-        $UnresolvedDeps = @(@($DependsOn[$ServiceName]) | Where-Object { $_ -in $Remaining -and $_ -notin $PrevLayer })
-        if ($UnresolvedDeps.Count -eq 0) { $Layer += $ServiceName }
+        $Unresolved = @(@($DependsOn[$ServiceName]) | Where-Object { $_ -in $Remaining })
       }
+      if ($Unresolved.Count -eq 0) { $Layer += $ServiceName }
     }
-    
+
     if ($Layer.Count -eq 0) {
       Write-Warning "Circular dependency detected among: $($Remaining -join ', ')"
-      $Layers += @($Remaining)
+      $Layers += , @($Remaining)
       break
     }
-    
-    $Layers += @($Layer)
+
+    # The comma is load-bearing: it appends the layer as a single element.
+    # Without it the layer is flattened into $Layers and every caller loses the
+    # grouping, turning parallel start/stop into one service at a time.
+    $Layers += , $Layer
     $Remaining = @($Remaining | Where-Object { $_ -notin $Layer })
   }
-  
-  return $Layers
+
+  # Same reason one level up: returning $Layers directly would unroll a
+  # single-layer result into a flat list of service names.
+  return , $Layers
 }
 
 function Get-StopOrder([string[]]$ServiceNames) {
@@ -379,17 +524,17 @@ function Stop-Many([string[]]$ServiceNames) {
       # Parallel stop for same layer
       $Jobs = $Layer | ForEach-Object {
         Start-ThreadJob -ScriptBlock {
-          param($ServiceName, $ModuleRoot, $Root, $ConfigJson)
+          param($ServiceName, $ModuleRoot, $Root, $ConfigPath)
           $script:ModuleRoot = $ModuleRoot
           $script:Root = $Root
-          $script:Config = $ConfigJson | ConvertFrom-Json
-          $script:ConfigPath = Join-Path $Root 'services.json'
+          $script:ConfigPath = $ConfigPath
           $script:RunDir = Join-Path $Root 'run'
           $script:LogDir = Join-Path $Root 'logs'
           # Import Stop-One and its dependencies
           . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
+          Read-Pp2Config
           Stop-One $ServiceName
-        } -ArgumentList $_, $script:ModuleRoot, $script:Root, ($script:Config | ConvertTo-Json -Depth 10)
+        } -ArgumentList $_, $script:ModuleRoot, $script:Root, $script:ConfigPath
       }
       $Jobs | Wait-Job | Receive-Job
       $Jobs | Remove-Job
@@ -425,7 +570,7 @@ function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
     Remove-Item $WatchPidPath -ErrorAction SilentlyContinue
   }
 
-  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ModuleRoot 'lib/pp2-watchdog.ps1'), '-Interval', $Interval, '-Root', $Root) -WindowStyle Hidden -PassThru
+  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ModuleRoot 'lib/pp2-watchdog.ps1'), '-Interval', $Interval, '-Root', $Root, '-Config', $script:ConfigPath) -WindowStyle Hidden -PassThru
   Set-Content -Path $TempPidPath -Value $Process.Id -NoNewline
   Start-Sleep -Milliseconds 500
 
@@ -450,7 +595,9 @@ function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
 }
 
 function Start-WatchdogIfNeeded([string[]]$Name = @('all')) {
-  $NeedsWatchdog = (Get-ServiceNames $Name | Where-Object { Get-ServiceProperty (Get-ServiceConfig $_) 'autoRestart' $false } | Select-Object -First 1) -ne $null
+  $NeedsWatchdog = $null -ne (Get-ServiceNames $Name |
+    Where-Object { Get-ServiceProperty (Get-ServiceConfig $_) 'autoRestart' $false } |
+    Select-Object -First 1)
   if ($NeedsWatchdog) { Start-WatchdogProcess -ReplaceExisting }
 }
 
@@ -563,13 +710,14 @@ Set-Content -Path $(ConvertTo-PwshLiteral $TempPidFile) -Value `$Process.Id -NoN
     return $true
   }
 
-  # Normal services: write PID and verify process stays alive
+  # Normal services: write PID and verify the process actually stays alive.
   Set-Content -Path (Get-PidPath $ServiceName) -Value $ActualPid -NoNewline
+  # The retry counter is deliberately preserved on watchdog-driven restarts
+  # (NoRetryReset) so that maxRetries can actually be reached.
   if (-not $NoRetryReset) { Remove-Item (Get-RetryPath $ServiceName) -ErrorAction SilentlyContinue }
-  $VerifyWaitMs = [int](Get-Setting 'startupVerifyWait' 2500)
-  Start-Sleep -Milliseconds $VerifyWaitMs
+  $ExitedEarly = Wait-ServiceStartup $ServiceName $ActualPid
 
-  if (-not (Get-Process -Id $ActualPid -ErrorAction SilentlyContinue)) {
+  if ($ExitedEarly) {
     Write-Host "WARNING: $ServiceName process (pid=$ActualPid) exited immediately"
     Remove-ServiceState $ServiceName
     return $false
@@ -579,33 +727,54 @@ Set-Content -Path $(ConvertTo-PwshLiteral $TempPidFile) -Value `$Process.Id -NoN
   return $true
 }
 
-function Start-Many([string[]]$ServiceNames, [bool]$Force) {
+function Start-Many([string[]]$ServiceNames, [bool]$Force, [bool]$NoRetryReset = $false) {
   $ServiceNames = @($ServiceNames)  # Ensure array
   $Layers = Get-DependencyLayers $ServiceNames
   foreach ($Layer in $Layers) {
     $Layer = @($Layer)  # Ensure layer is array
     if ($Layer.Count -eq 1) {
-      Start-One $Layer[0] $Force | Out-Null
+      Start-One $Layer[0] $Force $NoRetryReset | Out-Null
     } else {
       # Parallel start for same layer
       $Jobs = $Layer | ForEach-Object {
         Start-ThreadJob -ScriptBlock {
-          param($ServiceName, $Force, $ModuleRoot, $Root, $ConfigJson)
+          param($ServiceName, $Force, $NoRetryReset, $ModuleRoot, $Root, $ConfigPath)
           $script:ModuleRoot = $ModuleRoot
           $script:Root = $Root
-          $script:Config = $ConfigJson | ConvertFrom-Json
-          $script:ConfigPath = Join-Path $Root 'services.json'
+          $script:ConfigPath = $ConfigPath
           $script:RunDir = Join-Path $Root 'run'
           $script:LogDir = Join-Path $Root 'logs'
           # Import Start-One and its dependencies
           . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
-          Start-One $ServiceName $Force | Out-Null
-        } -ArgumentList $_, $Force, $script:ModuleRoot, $script:Root, ($script:Config | ConvertTo-Json -Depth 10)
+          Read-Pp2Config
+          Start-One $ServiceName $Force $NoRetryReset | Out-Null
+        } -ArgumentList $_, $Force, $NoRetryReset, $script:ModuleRoot, $script:Root, $script:ConfigPath
       }
       $Jobs | Wait-Job | Receive-Job
       $Jobs | Remove-Job
     }
   }
+}
+
+function Set-DefaultDisplayProperty {
+  <#
+  .SYNOPSIS
+    Give a status row a default table view without breaking the pipeline.
+
+  .DESCRIPTION
+    Piping to Format-Table inside the function would emit formatting records,
+    so `pp2 status | Where-Object ...` and `ConvertTo-Json` would see objects
+    that no longer carry the service properties. Declaring a display property
+    set instead keeps the objects intact and still renders as a table.
+  #>
+  param(
+    [Parameter(Mandatory)][psobject]$InputObject,
+    [Parameter(Mandatory)][string[]]$Property
+  )
+  $Set = [System.Management.Automation.PSPropertySet]::new('DefaultDisplayPropertySet', $Property)
+  $InputObject | Add-Member -MemberType MemberSet -Name PSStandardMembers `
+    -Value ([System.Management.Automation.PSMemberInfo[]]@($Set)) -Force
+  return $InputObject
 }
 
 function Show-Status([string[]]$Name = @('all'), [string]$Format = 'table') {
@@ -614,43 +783,37 @@ function Show-Status([string[]]$Name = @('all'), [string]$Format = 'table') {
     $ProcessOrEphemeral = Get-RecordedProcess $ServiceName
     $IsEphemeral = $ProcessOrEphemeral -eq 'ephemeral'
     $Process = if ($IsEphemeral) { $null } else { $ProcessOrEphemeral }
-    
+
     $Ports = @(Get-ServiceProperty $Service 'ports' @())
     $PortStatus = if ($Ports.Count -eq 0) { '-' } else { ($Ports | ForEach-Object { "$($_):$(if (Test-Port $_) { 'open' } else { 'closed' })" }) -join ', ' }
     $Stats = if ($IsEphemeral) { @{ CPU = '-'; Memory = '-' } } else { Get-ProcessStats $Process }
-    
-    # Calculate uptime from PID file creation time
-    $PidPath = Get-PidPath $ServiceName
-    $Uptime = if ($Process -and (Test-Path $PidPath)) {
-      $PidFileTime = (Get-Item $PidPath).LastWriteTime
-      $Duration = (Get-Date) - $PidFileTime
-      if ($Duration.TotalDays -ge 1) { "{0}d {1}h" -f [int]$Duration.TotalDays, [int]$Duration.Hours }
-      elseif ($Duration.TotalHours -ge 1) { "{0}h {1}m" -f [int]$Duration.TotalHours, [int]$Duration.Minutes }
-      else { "{0}m {1}s" -f [int]$Duration.TotalMinutes, [int]$Duration.Seconds }
-    } else { '-' }
-    
+
+    # Uptime is derived from when pp2 recorded the PID, not the OS process
+    # start time, so that PID reuse cannot produce a bogus duration.
+    $Uptime = if ($IsEphemeral) { '-' } else { Get-ServiceUptime $ServiceName $Process }
+
     # Get retry count
     $RetryPath = Get-RetryPath $ServiceName
     $Retries = if (Test-Path $RetryPath) { [int](Get-Content $RetryPath -Raw) } else { 0 }
     $MaxRetries = [int](Get-ServiceProperty $Service 'maxRetries' 3)
     $RetryStatus = if ($Retries -gt 0) { "$Retries/$MaxRetries" } else { '-' }
 
-    [pscustomobject]@{
-      Name = $ServiceName
-      Status = if ($IsEphemeral) { 'Running (ephemeral)' } elseif ($Process) { 'Running' } else { 'Stopped' }
-      Pid = if ($IsEphemeral) { '-' } elseif ($Process) { $Process.Id } else { '' }
-      Uptime = $Uptime
-      CPU = $Stats.CPU
-      Memory = $Stats.Memory
-      Ports = $PortStatus
-      Retries = $RetryStatus
-      AutoRestart = if (Get-ServiceProperty $Service 'autoRestart' $false) { 'yes' } else { 'no' }
-      Description = Get-ServiceProperty $Service 'description' ''
-    }
+    Set-DefaultDisplayProperty ([pscustomobject]@{
+        Name = $ServiceName
+        Status = if ($IsEphemeral) { 'Running (ephemeral)' } elseif ($Process) { 'Running' } else { 'Stopped' }
+        Pid = if ($IsEphemeral) { '-' } elseif ($Process) { $Process.Id } else { '' }
+        Uptime = $Uptime
+        CPU = $Stats.CPU
+        Memory = $Stats.Memory
+        Ports = $PortStatus
+        Retries = $RetryStatus
+        AutoRestart = if (Get-ServiceProperty $Service 'autoRestart' $false) { 'yes' } else { 'no' }
+        Description = Get-ServiceProperty $Service 'description' ''
+      }) -Property @('Name', 'Status', 'Pid', 'Uptime', 'CPU', 'Memory', 'Ports', 'Retries', 'AutoRestart', 'Description')
   }
 
   if ($Format -eq 'json') { $Rows | ConvertTo-Json -Depth 2 }
-  else { $Rows | Format-Table -AutoSize }
+  else { $Rows }
 }
 
 function Watch-Status([string[]]$Name, [string]$Format, [int]$Interval) {
@@ -681,12 +844,12 @@ function Show-Monit([string[]]$Name, [int]$Cols, [switch]$Interactive) {
       $idx = 0
       $allServices | ForEach-Object { Write-Host "  [$($idx+1)] $_"; $idx++ }
       Write-Host ''
-      $input = Read-Host "Select services (comma-separated numbers, or * for all)"
-      if ($input -eq '*' -or [string]::IsNullOrWhiteSpace($input)) { $ServicesToMonitor = $allServices }
+      $Selection = Read-Host "Select services (comma-separated numbers, or * for all)"
+      if ($Selection -eq '*' -or [string]::IsNullOrWhiteSpace($Selection)) { $ServicesToMonitor = $allServices }
       else {
         $parsed = @()
         $invalid = @()
-        foreach ($token in ($input -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })) {
+        foreach ($token in ($Selection -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })) {
           $num = 0
           if ([int]::TryParse($token, [ref]$num)) {
             if ($num -ge 1 -and $num -le $allServices.Count) { $parsed += $allServices[$num - 1] }
@@ -715,7 +878,8 @@ function Show-MonitDashboard {
 
   # Ctrl+C handler
   $script:monitExit = $false
-  $cancelHandler = [ConsoleCancelEventHandler]{ param($s,$e) $e.Cancel = $true; $script:monitExit = $true }
+  # Sender is part of the delegate signature and carries no information here.
+  $cancelHandler = [ConsoleCancelEventHandler]{ param($EventSource, $CancelArgs) $CancelArgs.Cancel = $true; $script:monitExit = $true }
   [Console]::CancelKeyPress += $cancelHandler
 
   # Per-service state: file positions + circular buffer
@@ -732,7 +896,9 @@ function Show-MonitDashboard {
   $origBg = [Console]::BackgroundColor
 
   try {
-    try { [Console]::CursorVisible = $false } catch { }
+    # Console cursor control is unavailable when output is redirected or the
+    # host has no console; the dashboard still works, just without hiding it.
+    try { [Console]::CursorVisible = $false } catch { Write-Debug "monit: cannot hide cursor: $_" }
     Clear-Host
 
     while (-not $script:monitExit) {
@@ -771,8 +937,13 @@ function Show-MonitDashboard {
             } else {
               $fs.Close()
             }
-          } catch [System.IO.FileNotFoundException] { }
-          catch { Write-Debug "monit read $($stream.path): $_" }
+          } catch {
+            # A log file that does not exist yet is normal for a service that
+            # has never produced output; anything else is worth surfacing.
+            if ($_.Exception -isnot [System.IO.FileNotFoundException]) {
+              Write-Debug "monit read $($stream.path): $_"
+            }
+          }
         }
 
         # Trim buffer to avoid unbounded growth
@@ -838,7 +1009,7 @@ function Show-MonitDashboard {
   }
   finally {
     [Console]::CancelKeyPress -= $cancelHandler
-    try { [Console]::CursorVisible = $origVis } catch { }
+    try { [Console]::CursorVisible = $origVis } catch { Write-Debug "monit: cannot restore cursor: $_" }
     [Console]::ResetColor()
     Write-Host "pp2-monit: exited" -ForegroundColor DarkGray
     Start-Sleep -Milliseconds 200
@@ -855,8 +1026,9 @@ function Show-WatchdogStatus {
   else { Write-Host 'watchdog not running (stale PID file)' }
 }
 
-function Install-StartupTask([string]$ModuleManifestPath, [string]$StateRoot) {
-  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $StateRoot); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 start all }"
+function Install-StartupTask([string]$ModuleManifestPath, [string]$StateRoot, [string]$ConfigPath) {
+  $ConfigArg = if ($ConfigPath) { " -Config $(ConvertTo-PwshLiteral $ConfigPath)" } else { '' }
+  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $StateRoot); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 start all$ConfigArg }"
   $ActionDef = New-ScheduledTaskAction -Execute (Get-PwshPath) -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$Command`""
   $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest

@@ -9,7 +9,12 @@
     PowerShellVersion    = '7.0'
     CompatiblePSEditions = @('Core')
 
-    RequiredModules     = @('ThreadJob')
+    # Parallel start/stop uses ThreadJob. Microsoft.PowerShell.ThreadJob is the
+    # canonical name as of PowerShell 7.6; ThreadJob is the legacy name still
+    # shipped with 7.4 and earlier. The module's .psm1 will fall back to the
+    # legacy name when the new one is not available, so the manifest only
+    # requires the canonical one and lets the loader resolve either.
+    RequiredModules     = @('Microsoft.PowerShell.ThreadJob')
 
     FunctionsToExport = @(
         'pp2'
