@@ -8,6 +8,10 @@ PowerShell-based service manager for managing background processes with dependen
 
 **pp2 = PowerShell × pm2**
 
+> **Status:** stable, 48/48 tests passing, public on GitHub. **Not yet on
+> the PowerShell Gallery** — install from a clone for now (see below).
+> Track publication: [github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases).
+
 ## Installation
 
 ### Prerequisites
@@ -16,14 +20,11 @@ PowerShell-based service manager for managing background processes with dependen
 - **Windows Terminal**: Optional
 - **sudo for Windows**: Optional for `elevated` option (`winget install gerardog.gsudo`)
 
-### PowerShell Gallery (Recommended)
+### Local clone (currently the only way to get it)
 
-```pwsh
-Install-Module -Name pp2 -Repository PSGallery
-Import-Module pp2
-```
-
-### Local Installation
+The module is not yet published to the PowerShell Gallery. Until it is,
+install it from a clone of the public GitHub repository
+([john-walks-slow/pp2](https://github.com/john-walks-slow/pp2)):
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
@@ -31,11 +32,28 @@ cd pp2
 .\install.ps1
 ```
 
-The `pp2` command is available after installation.
+`install.ps1` copies `src/pp2/` into the first writable directory in
+`$env:PSModulePath`, so `Import-Module pp2` works afterwards. The
+`pp2` command is then available in any PowerShell 7+ session.
 
-To reinstall: `.\install.ps1 -Force`
+| Action                 | Command                                          |
+| ---------------------- | ------------------------------------------------ |
+| Reinstall              | `.\install.ps1 -Force`                           |
+| Uninstall              | `.\install.ps1 -Uninstall`                       |
+| Run without installing | `./pp2.ps1 <action> [name]` (uses the source tree directly) |
 
-To uninstall: `.\install.ps1 -Uninstall`
+### PowerShell Gallery (planned)
+
+Once a release is published to PSGallery:
+
+```pwsh
+Install-Module -Name pp2 -Repository PSGallery
+Import-Module pp2
+```
+
+Until then `Install-Module -Name pp2` will fail with "Package 'pp2' was
+not found in the PowerShell Gallery". Track publication status at
+[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases).
 
 ## Quick Start
 
@@ -307,6 +325,18 @@ Services with `dependsOn` start in correct order. Stop operations use reverse de
 
 **`PP2_HOME` is ignored between commands:**
 
-- This is fixed in 1.0.0: every command re-reads `PP2_HOME`. If you still
-  see the previous home, check that you are not running an older copy of
-  the module (`Get-Module pp2 | Select-Object Version,Path`).
+- This is fixed in the current source: every command re-reads
+  `PP2_HOME`. If you still see the previous home, check that you are not
+  running an older copy of the module
+  (`Get-Module pp2 | Select-Object Version,Path`).
+
+## Releases
+
+Version history lives in [CHANGELOG.md](CHANGELOG.md). Tagged GitHub
+releases are at [github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases);
+each release is built and tested by
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+A future `v1.0.0` tag will also publish the module to the PowerShell
+Gallery via [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
+Until that happens `Install-Module -Name pp2` returns "Package not found" — use the local-clone install path above.
