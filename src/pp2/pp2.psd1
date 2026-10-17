@@ -14,8 +14,12 @@
     # shipped with 7.4 and earlier. The module's .psm1 will fall back to the
     # legacy name when the new one is not available, so the manifest only
     # requires the canonical one and lets the loader resolve either.
-    RequiredModules     = @('Microsoft.PowerShell.ThreadJob')
-
+    # ThreadJob is intentionally NOT a RequiredModule. PowerShell 7.6+ bundles
+    # Microsoft.PowerShell.ThreadJob, so installing it per-user collides with
+    # the bundled copy and Install-Module aborts with "commands are already
+    # available on this system... use -AllowClobber". Naming it here would make
+    # the documented `Install-Module pp2` fail for every user. pp2 imports it
+    # at runtime when available and falls back to serial start/stop when not.
     FunctionsToExport = @(
         'pp2'
         'Start-Pp2Service'

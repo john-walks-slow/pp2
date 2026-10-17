@@ -1,11 +1,8 @@
-# Fall back to the legacy ThreadJob module name on PowerShell 7.4 and
-# earlier, which still ship it under that name. PowerShell 7.6 renamed it
-# to Microsoft.PowerShell.ThreadJob and now warns about the old one.
-if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.ThreadJob) -and
-    (Get-Module -ListAvailable -Name ThreadJob)) {
-    Import-Module -Name ThreadJob -ErrorAction Stop
-}
-
+# ThreadJob powers parallel start/stop but is not required. PowerShell ships
+# it under different names across versions (Microsoft.PowerShell.ThreadJob as
+# of 7.6, ThreadJob before), and it must not be declared as a RequiredModule
+# because the bundled copy collides with a per-user install. pp2 pulls it in on
+# first use and falls back to serial start/stop if it is unavailable.
 $script:Pp2Root = if ($env:PP2_HOME) { $env:PP2_HOME } else { Join-Path $HOME '.pp2' }
 
 # Import private (internal) functions

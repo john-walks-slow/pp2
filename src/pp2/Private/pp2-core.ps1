@@ -513,32 +513,87 @@ function Stop-One([string]$ServiceName) {
   Write-Host "stopped $ServiceName"
 }
 
+function Test-ThreadJobAvailable {
+  <#
+  .SYNOPSIS
+    Whether Start-ThreadJob can be used for parallel start/stop.
+
+  .DESCRIPTION
+    ThreadJob is an optimisation, not a requirement: without it, services in
+    the same dependency layer start and stop one after another instead of
+    concurrently. It ships with PowerShell itself, under the name
+    Microsoft.PowerShell.ThreadJob as of 7.6 and ThreadJob before that, so
+    this is normally true.
+
+    The module deliberately does not declare ThreadJob in RequiredModules:
+    on PowerShell 7.6+ the bundled copy collides with a per-user install of
+    the same module, and Install-Module refuses with "commands are already
+    available on this system... use -AllowClobber". Requiring it would make
+    the documented install command fail for every new user.
+  #>
+  if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) { return $true }
+  foreach ($Name in @('Microsoft.PowerShell.ThreadJob', 'ThreadJob')) {
+    if (Get-Module -ListAvailable -Name $Name -ErrorAction SilentlyContinue) {
+      try { Import-Module $Name -ErrorAction Stop; return [bool](Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) }
+      catch { continue }
+    }
+  }
+  return $false
+}
+
+function Invoke-ServiceBatch {
+  <#
+  .SYNOPSIS
+    Run one action over several services, in parallel when ThreadJob is present.
+
+  .DESCRIPTION
+    Serialises a module-internal command so it can run in a fresh thread: the
+    worker needs the module root, state root and config path, because a new
+    ThreadJob runspace starts with none of this module's script-scope state.
+
+    Return values of the invoked command are discarded: Start-One reports
+    success as a Boolean, which would otherwise surface as stray "True" lines
+    in `pp2 start all`. Failures are already reported by the command itself.
+  #>
+  param(
+    [Parameter(Mandatory)][string[]]$ServiceName,
+    [Parameter(Mandatory)][string]$Command,
+    [Parameter(Mandatory)][hashtable]$Argument
+  )
+
+  if ($ServiceName.Count -le 1 -or -not (Test-ThreadJobAvailable)) {
+    foreach ($Name in $ServiceName) { & $Command $Name @Argument | Out-Null }
+    return
+  }
+
+  $ModuleRoot = $script:ModuleRoot
+  $Root = $script:Root
+  $ConfigPath = $script:ConfigPath
+
+  $Jobs = $ServiceName | ForEach-Object {
+    Start-ThreadJob -ScriptBlock {
+      param($ServiceName, $Command, $Argument, $ModuleRoot, $Root, $ConfigPath)
+      $script:ModuleRoot = $ModuleRoot
+      $script:Root = $Root
+      $script:ConfigPath = $ConfigPath
+      $script:RunDir = Join-Path $Root 'run'
+      $script:LogDir = Join-Path $Root 'logs'
+      . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
+      Read-Pp2Config
+      # Suppress the worker's return value: Start-One reports success as a
+      # Boolean, which would otherwise arrive as stray "True" output.
+      & $Command $ServiceName @Argument | Out-Null
+    } -ArgumentList $_, $Command, $Argument, $ModuleRoot, $Root, $ConfigPath
+  }
+  $Jobs | Wait-Job | Receive-Job | Out-Null
+  $Jobs | Remove-Job
+}
+
 function Stop-Many([string[]]$ServiceNames) {
   $ServiceNames = @($ServiceNames)  # Ensure array
   $Layers = Get-DependencyLayers $ServiceNames -Reverse
   foreach ($Layer in $Layers) {
-    $Layer = @($Layer)  # Ensure layer is array
-    if ($Layer.Count -eq 1) {
-      Stop-One $Layer[0]
-    } else {
-      # Parallel stop for same layer
-      $Jobs = $Layer | ForEach-Object {
-        Start-ThreadJob -ScriptBlock {
-          param($ServiceName, $ModuleRoot, $Root, $ConfigPath)
-          $script:ModuleRoot = $ModuleRoot
-          $script:Root = $Root
-          $script:ConfigPath = $ConfigPath
-          $script:RunDir = Join-Path $Root 'run'
-          $script:LogDir = Join-Path $Root 'logs'
-          # Import Stop-One and its dependencies
-          . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
-          Read-Pp2Config
-          Stop-One $ServiceName
-        } -ArgumentList $_, $script:ModuleRoot, $script:Root, $script:ConfigPath
-      }
-      $Jobs | Wait-Job | Receive-Job
-      $Jobs | Remove-Job
-    }
+    Invoke-ServiceBatch -ServiceName @($Layer) -Command 'Stop-One' -Argument @{}
   }
 }
 
@@ -731,28 +786,8 @@ function Start-Many([string[]]$ServiceNames, [bool]$Force, [bool]$NoRetryReset =
   $ServiceNames = @($ServiceNames)  # Ensure array
   $Layers = Get-DependencyLayers $ServiceNames
   foreach ($Layer in $Layers) {
-    $Layer = @($Layer)  # Ensure layer is array
-    if ($Layer.Count -eq 1) {
-      Start-One $Layer[0] $Force $NoRetryReset | Out-Null
-    } else {
-      # Parallel start for same layer
-      $Jobs = $Layer | ForEach-Object {
-        Start-ThreadJob -ScriptBlock {
-          param($ServiceName, $Force, $NoRetryReset, $ModuleRoot, $Root, $ConfigPath)
-          $script:ModuleRoot = $ModuleRoot
-          $script:Root = $Root
-          $script:ConfigPath = $ConfigPath
-          $script:RunDir = Join-Path $Root 'run'
-          $script:LogDir = Join-Path $Root 'logs'
-          # Import Start-One and its dependencies
-          . (Join-Path $ModuleRoot 'Private\pp2-core.ps1')
-          Read-Pp2Config
-          Start-One $ServiceName $Force $NoRetryReset | Out-Null
-        } -ArgumentList $_, $Force, $NoRetryReset, $script:ModuleRoot, $script:Root, $script:ConfigPath
-      }
-      $Jobs | Wait-Job | Receive-Job
-      $Jobs | Remove-Job
-    }
+    Invoke-ServiceBatch -ServiceName @($Layer) -Command 'Start-One' `
+      -Argument @{ Force = $Force; NoRetryReset = $NoRetryReset }
   }
 }
 
