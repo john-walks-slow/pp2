@@ -25,4 +25,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: .\build.ps1 -Build -Version "0.0.${GITHUB_RUN_NUMBER}"
+        # Build-only smoke check: the staged module must be valid and the
+        # manifest must parse. Publishing versions are handled by publish.yml,
+        # which takes its version from the tag.
+        run: .\build.ps1 -Build

@@ -118,6 +118,15 @@ function Step-Publish {
     }
     Import-Module Microsoft.PowerShell.PSResourceGet -ErrorAction Stop
 
+    # The Gallery rejects a duplicate id+version with HTTP 409 and the version
+    # cannot be overwritten. Treat that as "already released" rather than a
+    # failure, so re-running a tag build is a no-op instead of a red run.
+    $Existing = Find-PSResource -Name $ModuleName -Repository $Repository -Version $Version -ErrorAction SilentlyContinue
+    if ($Existing) {
+        Write-Host "  $ModuleName v$Version is already published to $Repository; nothing to do." -ForegroundColor Yellow
+        return
+    }
+
     Publish-PSResource -Path $StagingDir -ApiKey $NuGetApiKey -Repository $Repository -SkipDependenciesCheck
     Write-Host "  Published $ModuleName v$Version to $Repository" -ForegroundColor Green
 }
