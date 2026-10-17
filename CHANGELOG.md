@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-10-17
+
+### Fixed
+
+- `Install-Module pp2` failed on PowerShell 7.6+ with "The following
+  commands are already available on this system: 'Start-ThreadJob'...
+  use -AllowClobber parameter", leaving nothing installed. PowerShell 7.6
+  bundles `Microsoft.PowerShell.ThreadJob` machine-wide, and the module's
+  hard `RequiredModules` entry collided with it during the per-user
+  install. ThreadJob is now resolved at runtime by either of its names
+  (`Microsoft.PowerShell.ThreadJob` on 7.6+, `ThreadJob` before) and is
+  optional: without it, services in the same dependency layer start and
+  stop sequentially instead of in parallel.
+- `pp2 start all` printed stray `True` lines, one per service, because the
+  parallel worker's Boolean return value was passed through.
+- `Publish-Module` could not be used at all on non-English Windows; the
+  build now publishes with `Publish-PSResource`, which packs in-process.
+- Publishing from `src/` shipped `PSScriptAnalyzerSettings.psd1` to
+  consumers; the build publishes only the staged `output/` tree.
+
 ## [1.0.0] - 2026-10-17
 
 First published release
