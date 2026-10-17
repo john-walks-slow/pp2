@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-10-17
+
+### Fixed
+
+- `pp2 monit` crashed on every invocation with `PropertyNotFoundException:
+  Cannot find property 'CancelKeyPress'`. `CancelKeyPress` is a .NET event
+  and the module runs under `Set-StrictMode -Version Latest`, which refuses
+  to read an event as a property; the `+=` subscription idiom therefore
+  threw. The dashboard now subscribes through
+  `[Console]::add_CancelKeyPress` / `remove_CancelKeyPress`, which are
+  method calls and unaffected by strict mode, so Ctrl+C works and the
+  terminal is restored on exit.
+- `pp2 monit` now reports "needs an interactive console" and returns
+  cleanly when output is redirected, instead of failing with a raw .NET
+  exception part-way through drawing.
+
 ## [1.0.1] - 2026-10-17
 
 ### Fixed
