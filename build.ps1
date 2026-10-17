@@ -99,7 +99,6 @@ function Step-Build {
 
 function Step-Publish {
     Write-Host "[Publish] Publishing to $Repository..." -ForegroundColor Cyan
-    if (-not $NuGetApiKey) { throw "NuGetApiKey is required for publishing." }
 
     $Psd1Path = Join-Path $StagingDir "$ModuleName.psd1"
     if (-not (Test-Path $Psd1Path)) { throw "Build output not found. Run -Build first." }
@@ -118,16 +117,41 @@ function Step-Publish {
     }
     Import-Module Microsoft.PowerShell.PSResourceGet -ErrorAction Stop
 
+    $Target = Get-PSResourceRepository -Name $Repository -ErrorAction SilentlyContinue
+    if (-not $Target) {
+        throw "Repository '$Repository' is not registered. Register it with Register-PSResourceRepository, or use -Repository PSGallery."
+    }
+
+    # A file-based repository needs no credentials, which is what makes
+    # "publish to a folder, then Install-PSResource" a usable install path for
+    # people who do not want the public Gallery. Only a remote repository
+    # requires a key.
+    $IsLocal = $Target.Uri.IsFile
+    if (-not $IsLocal -and -not $NuGetApiKey) {
+        throw "NuGetApiKey is required to publish to the remote repository '$Repository'."
+    }
+
     # The Gallery rejects a duplicate id+version with HTTP 409 and the version
     # cannot be overwritten. Treat that as "already released" rather than a
     # failure, so re-running a tag build is a no-op instead of a red run.
-    $Existing = Find-PSResource -Name $ModuleName -Repository $Repository -Version $Version -ErrorAction SilentlyContinue
-    if ($Existing) {
-        Write-Host "  $ModuleName v$Version is already published to $Repository; nothing to do." -ForegroundColor Yellow
-        return
+    # A file repository overwrites in place, so re-publishing there is expected
+    # to just work and must not be short-circuited.
+    if (-not $IsLocal) {
+        $Existing = Find-PSResource -Name $ModuleName -Repository $Repository -Version $Version -ErrorAction SilentlyContinue
+        if ($Existing) {
+            Write-Host "  $ModuleName v$Version is already published to $Repository; nothing to do." -ForegroundColor Yellow
+            return
+        }
     }
 
-    Publish-PSResource -Path $StagingDir -ApiKey $NuGetApiKey -Repository $Repository -SkipDependenciesCheck
+    $PublishArgs = @{
+        Path                  = $StagingDir
+        Repository            = $Repository
+        SkipDependenciesCheck = $true
+    }
+    if ($NuGetApiKey) { $PublishArgs.ApiKey = $NuGetApiKey }
+
+    Publish-PSResource @PublishArgs
     Write-Host "  Published $ModuleName v$Version to $Repository" -ForegroundColor Green
 }
 

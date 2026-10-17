@@ -43,24 +43,38 @@ Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 To install for all users instead, drop `-Scope CurrentUser` and run from an
 elevated session.
 
-### From source
+### Without the Gallery
 
-For development, or to run unreleased commits:
+If you would rather not pull from a public gallery, build a package locally and
+install from a folder. `build.ps1` publishes to any registered repository, and a
+folder needs no credentials:
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
 cd pp2
-.\install.ps1
+.\build.ps1 -Build
+Register-PSResourceRepository -Name pp2local -Uri D:\psrepo -Trusted
+.\build.ps1 -Build -Publish -Repository pp2local
+Install-PSResource -Name pp2 -Repository pp2local -Trusted
 ```
 
-`install.ps1` copies `src/pp2/` into the first writable directory in
-`$env:PSModulePath`, so `Import-Module pp2` works afterwards.
+Upgrade later with `Update-PSResource -Name pp2 -Repository pp2local`.
 
-| Action                 | Command                                                      |
-| ---------------------- | ------------------------------------------------------------ |
-| Reinstall              | `.\install.ps1 -Force`                                       |
-| Uninstall              | `.\install.ps1 -Uninstall`                                   |
-| Run without installing | `./pp2.ps1 <action> [name]` (uses the source tree directly)  |
+### Development
+
+To hack on pp2, import straight from the source tree — no install step, and
+edits take effect on the next `-Force` import:
+
+```pwsh
+git clone https://github.com/john-walks-slow/pp2.git
+cd pp2
+Import-Module .\src\pp2\pp2.psd1 -Force
+pp2 help
+```
+
+Re-run the `Import-Module` line after changing any module file. This is
+session-scoped; to install the working copy persistently, use the folder
+repository above.
 
 ## Quick Start
 

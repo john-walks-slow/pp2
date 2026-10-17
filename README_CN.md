@@ -42,24 +42,36 @@ Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 
 若要为所有用户安装，去掉 `-Scope CurrentUser` 并在管理员会话中执行。
 
-### 从源码安装
+### 不走 Gallery 安装
 
-用于开发，或运行尚未发布的提交：
+若不想从公开 Gallery 拉取，可在本地打包后从文件夹安装。`build.ps1` 支持发布到
+任意已注册的仓库，而文件夹仓库无需任何凭据：
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
 cd pp2
-.\install.ps1
+.\build.ps1 -Build
+Register-PSResourceRepository -Name pp2local -Uri D:\psrepo -Trusted
+.\build.ps1 -Build -Publish -Repository pp2local
+Install-PSResource -Name pp2 -Repository pp2local -Trusted
 ```
 
-`install.ps1` 会把 `src/pp2/` 复制到 `$env:PSModulePath` 中第一个可写目录，
-之后 `Import-Module pp2` 即可使用。
+后续升级使用 `Update-PSResource -Name pp2 -Repository pp2local`。
 
-| 操作             | 命令                                                  |
-| ---------------- | ----------------------------------------------------- |
-| 重新安装         | `.\install.ps1 -Force`                                |
-| 卸载             | `.\install.ps1 -Uninstall`                            |
-| 不安装直接运行   | `./pp2.ps1 <action> [name]`（直接使用源码树）         |
+### 开发调试
+
+若要在 pp2 上改代码，直接从源码树导入即可——无需安装步骤，改动在下次
+`-Force` 导入时生效：
+
+```pwsh
+git clone https://github.com/john-walks-slow/pp2.git
+cd pp2
+Import-Module .\src\pp2\pp2.psd1 -Force
+pp2 help
+```
+
+修改模块文件后重新执行这行 `Import-Module`。该方式仅在当前会话有效；若要把
+工作副本持久安装，请使用上面的文件夹仓库方式。
 
 ## 快速开始
 
