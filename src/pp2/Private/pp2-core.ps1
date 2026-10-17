@@ -911,11 +911,18 @@ function Show-MonitDashboard {
   $ServiceCount = $Services.Count
   $MaxCols = [Math]::Max(1, [Math]::Min($Cols, $ServiceCount))
 
-  # Ctrl+C handler
+  # Ctrl+C handler.
+  #
+  # Subscribed through the add_/remove_ accessors rather than the `+=` operator.
+  # CancelKeyPress is a .NET event, and under Set-StrictMode -Version Latest
+  # (set at the top of this file) PowerShell refuses to read an event as if it
+  # were a property, so plain `[Console]::CancelKeyPress += $h` throws
+  # PropertyNotFoundException. Calling the accessor is a method invocation and
+  # is unaffected by strict mode.
   $script:monitExit = $false
-  # Sender is part of the delegate signature and carries no information here.
+  # $EventSource is part of the delegate signature and carries no information here.
   $cancelHandler = [ConsoleCancelEventHandler]{ param($EventSource, $CancelArgs) $CancelArgs.Cancel = $true; $script:monitExit = $true }
-  [Console]::CancelKeyPress += $cancelHandler
+  [Console]::add_CancelKeyPress($cancelHandler)
 
   # Per-service state: file positions + circular buffer
   $state = @{}
@@ -930,9 +937,21 @@ function Show-MonitDashboard {
   $origVis = try { [Console]::CursorVisible } catch { $true }
   $origBg = [Console]::BackgroundColor
 
+  # The dashboard paints by absolute cursor positioning, which needs a real
+  # console. With output redirected (| Out-File, a CI job, a scheduled task)
+  # every SetCursorPosition throws, so say so once instead of dying mid-draw.
+  $cursorUsable = $true
+  try { [Console]::SetCursorPosition(0, 0) } catch { $cursorUsable = $false }
+
   try {
-    # Console cursor control is unavailable when output is redirected or the
-    # host has no console; the dashboard still works, just without hiding it.
+    if (-not $cursorUsable) {
+      Write-Host "pp2 monit needs an interactive console; output is redirected." -ForegroundColor Yellow
+      Write-Host "Run it directly in a terminal window." -ForegroundColor Yellow
+      return
+    }
+
+    # Console cursor control is unavailable when the host has no console; the
+    # dashboard still works, just without hiding the cursor.
     try { [Console]::CursorVisible = $false } catch { Write-Debug "monit: cannot hide cursor: $_" }
     Clear-Host
 
@@ -1043,12 +1062,14 @@ function Show-MonitDashboard {
     }
   }
   finally {
-    [Console]::CancelKeyPress -= $cancelHandler
+    [Console]::remove_CancelKeyPress($cancelHandler)
     try { [Console]::CursorVisible = $origVis } catch { Write-Debug "monit: cannot restore cursor: $_" }
-    [Console]::ResetColor()
+    try { [Console]::ResetColor() } catch { Write-Debug "monit: cannot reset color: $_" }
     Write-Host "pp2-monit: exited" -ForegroundColor DarkGray
-    Start-Sleep -Milliseconds 200
-    Clear-Host
+    if ($cursorUsable) {
+      Start-Sleep -Milliseconds 200
+      Clear-Host
+    }
   }
 }
 
