@@ -35,6 +35,47 @@ Describe 'Module structure' {
         $FromManifest | Should -Be $FromModule
     }
 
+    It 'exports every function defined under Public/' {
+        # The check above only compares the manifest against the psm1's own
+        # Export-ModuleMember list, so it misses the most common way this drifts:
+        # adding Public/Get-Pp2Thing.ps1 and updating neither list. The function
+        # then loads but is never exported, so users cannot call it, and the
+        # manifest and module still agree with each other and stay green.
+        # Source the definitions directly and require each one to be exported.
+        $Defined = Get-ChildItem (Join-Path $ModuleRoot 'Public') -Filter '*.ps1' |
+            ForEach-Object {
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$null)
+                $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) |
+                    ForEach-Object { $_.Name }
+            } | Sort-Object -Unique
+
+        $Exported = (Get-Module pp2).ExportedFunctions.Keys | Sort-Object
+
+        $Defined | Should -Not -BeNullOrEmpty
+        $Missing = @($Defined | Where-Object { $_ -notin $Exported })
+        $Missing | Should -BeNullOrEmpty -Because "these are defined in Public/ but not exported: $($Missing -join ', ')"
+    }
+
+    It 'does not announce exports it does not define' {
+        # The mirror image: a name in Export-ModuleMember with no matching
+        # function is silently ignored by PowerShell, which hides a typo or a
+        # function that was renamed without updating the export list.
+        $Declared = (Get-Content (Join-Path $ModuleRoot 'pp2.psm1') -Raw) -split "`n" |
+            ForEach-Object {
+                if ($_ -match "^\s*'([A-Za-z][\w-]*)'") { $Matches[1] }
+            } | Sort-Object -Unique
+
+        $Defined = Get-ChildItem (Join-Path $ModuleRoot 'Public') -Filter '*.ps1' |
+            ForEach-Object {
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$null)
+                $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) |
+                    ForEach-Object { $_.Name }
+            } | Sort-Object -Unique
+
+        $Phantom = @($Declared | Where-Object { $_ -notin $Defined })
+        $Phantom | Should -BeNullOrEmpty -Because "these are announced in pp2.psm1 but not defined anywhere: $($Phantom -join ', ')"
+    }
+
     It 'declares a version, author and description' {
         $Manifest = Test-ModuleManifest -Path (Join-Path $ModuleRoot 'pp2.psd1')
         $Manifest.Version | Should -BeGreaterThan ([version]'0.0.0')
