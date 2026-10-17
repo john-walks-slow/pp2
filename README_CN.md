@@ -250,6 +250,42 @@ pp2 monit [name] [-Cols 3]     # 多窗格日志仪表盘（Ctrl+C 退出）
 pp2 list                       # 列出服务名称
 ```
 
+### 编辑服务
+
+```pwsh
+pp2 show <name>                # 查看单个服务定义（-Format json）
+pp2 add <name> -Field @{...}   # 新增服务（同名加 -Force 覆盖）
+pp2 set <name> <field> <value> # 修改单个字段
+pp2 remove <name>[,<name>]     # 从配置中移除服务
+```
+
+```pwsh
+pp2 add web -Field @{command='npx'; arguments=@('-y','http-server'); ports=@(8080)}
+pp2 set web autoRestart true
+pp2 set web ports 9000,9001
+pp2 remove web
+pp2 remove web,old-api -Purge
+```
+
+`remove` 接受逗号分隔的多个服务名；其余命令只作用于单个服务。多余的第二个
+位置参数会被拒绝，而不是被静默忽略。
+
+这些命令只改写 `services.json`，不会影响已经在运行的进程——它仍使用启动时的
+参数。加 `-Restart` 可顺带重启受影响的服务；目标正在运行时默认会先确认，加
+`-Force` 跳过。`-Purge` 会连带删除该服务的状态文件与日志。
+
+值按字段应有的类型写入：`pp2 set web maxRetries 5` 写入数字，
+`pp2 set web shell true` 写入布尔值。数组字段支持逗号分隔或 JSON 数组；
+`env` 这类对象字段使用 JSON：
+
+```pwsh
+pp2 set web env '{"PORT":"3000"}'
+```
+
+写入前会校验服务定义：缺少 `command`、`ports` 含非数字、`ephemeral` 未配
+`shutdownCommand`、`dependsOn` 指向不存在的服务，都会当场报错，而不是存下来
+留给 `pp2 start` 之后才发现。
+
 ### Watchdog 控制
 
 ```pwsh
@@ -273,6 +309,8 @@ pp2 startup-uninstall          # 从 Windows 启动移除
 -Tail 80                       # 显示日志行数
 -Cols 3                        # monit 仪表盘最大列数
 -Force                         # 跳过确认提示
+-Restart                       # 顺带重启本次编辑涉及的服务
+-Purge                         # （remove）连带删除状态文件与日志
 -Config <path>                 # 使用指定的 services.json 文件
 ```
 

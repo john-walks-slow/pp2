@@ -56,3 +56,6 @@ src/pp2/services.json
 
 # Local agent scratchpads
 .opencode/
+
+# Git worktrees
+.worktrees/

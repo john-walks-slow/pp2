@@ -255,6 +255,46 @@ pp2 monit [name] [-Cols 3]     # Multi-pane log dashboard (Ctrl+C to exit)
 pp2 list                       # List service names
 ```
 
+### Editing Services
+
+```pwsh
+pp2 show <name>                # Show one service definition (-Format json)
+pp2 add <name> -Field @{...}   # Add a service (or replace one with -Force)
+pp2 set <name> <field> <value> # Change a single field
+pp2 remove <name>[,<name>]     # Remove services from the config
+```
+
+```pwsh
+pp2 add web -Field @{command='npx'; arguments=@('-y','http-server'); ports=@(8080)}
+pp2 set web autoRestart true
+pp2 set web ports 9000,9001
+pp2 remove web
+pp2 remove web,old-api -Purge
+```
+
+`remove` takes a comma-separated list; the other commands act on a single
+service. A stray second argument is rejected rather than ignored.
+
+These commands rewrite `services.json`; they do not touch a service that is
+already running, which keeps the settings it was launched with. Add `-Restart`
+to restart the affected services, and `-Force` to skip the confirmation prompt
+shown when the target is running. `-Purge` also deletes the service's state
+files and logs.
+
+Values are stored with the type the field expects, so `pp2 set web maxRetries 5`
+writes a number and `pp2 set web shell true` writes a boolean. Array fields
+accept a comma-separated list or a JSON array; object fields such as `env` take
+JSON:
+
+```pwsh
+pp2 set web env '{"PORT":"3000"}'
+```
+
+A definition is validated before it is written, so a missing `command`, a
+non-numeric `ports` entry, an `ephemeral` service without `shutdownCommand`, or
+a `dependsOn` naming a service that does not exist is rejected instead of being
+saved for `pp2 start` to discover later.
+
 ### Watchdog Control
 
 ```pwsh
@@ -278,6 +318,8 @@ pp2 startup-uninstall          # Remove from Windows startup
 -Tail 80                       # Log lines to display
 -Cols 3                        # monit max columns
 -Force                         # Skip confirmation prompts
+-Restart                       # Restart the services an edit touched
+-Purge                         # (remove) also delete state files and logs
 -Config <path>                 # Use specified services.json file
 ```
 

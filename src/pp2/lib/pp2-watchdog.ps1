@@ -2,13 +2,26 @@ param(
   [int]$Interval = 60,
   [Parameter(Mandatory = $true)]
   [string]$Root,
-  [string]$Config
+  # Not named $Config: this script's scope also holds pp2-core's $script:Config,
+  # the parsed configuration. A parameter of that name is the same variable, and
+  # a parameter binding outranks an assignment -- so $script:Config kept holding
+  # this path string, Read-Pp2Config's assignment never took effect, and
+  # $Config.services threw PropertyNotFoundException.
+  #
+  # Where that throw lands is what made this so quiet. The foreach enumerates
+  # $Config.services... in its own header, so the exception aborts the loop body
+  # before the first service is looked at -- and the loop keeps iterating, because
+  # the throw is outside the foreach. The watchdog stayed alive and its PID file
+  # stayed valid, so nothing looked wrong, but not one service was ever checked:
+  # auto-restart was dead for all of them. The only trace was on the hidden
+  # process's stderr, which goes nowhere.
+  [string]$ConfigPath
 )
 
 $ErrorActionPreference = 'Continue'
 . (Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'Private\pp2-core.ps1')
 Initialize-Pp2Context -ScriptRoot $Root
-if ($Config) { $script:ConfigPath = $Config }
+if ($ConfigPath) { $script:ConfigPath = $ConfigPath }
 Read-Pp2Config
 
 $DefaultInterval = [int](Get-Setting 'watchdogInterval' 60)

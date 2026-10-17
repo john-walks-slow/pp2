@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-17
+
+### Added
+
+- Config-editing commands, so `services.json` no longer has to be edited by
+  hand: `pp2 show <name>`, `pp2 add <name> -Field @{...}`,
+  `pp2 set <name> <field> <value>` and `pp2 remove <name>[,<name>]`. Values are
+  written with the type the field expects (`set web maxRetries 5` stores a
+  number, not `"5"`), and a definition is validated before it is saved, so a
+  missing `command`, a non-numeric port, an `ephemeral` service without
+  `shutdownCommand` or a `dependsOn` naming a service that does not exist is
+  rejected at the edit instead of silently persisted.
+- `-Restart` on an edit restarts the services it touched. Without it an edit
+  changes only the stored config; a running service keeps the settings it was
+  launched with, and `pp2` says so rather than appearing to do nothing.
+- `-Force` skips the confirmation prompt shown when an edit targets a running
+  service, and `-Purge` on `remove` also deletes that service's state files
+  and logs.
+
+### Fixed
+
+- The watchdog never auto-restarted anything. `lib/pp2-watchdog.ps1` declared a
+  parameter named `$Config`, which in that script's scope is the same variable
+  as pp2-core's `$script:Config` holding the parsed configuration. A parameter
+  binding outranks an assignment, so `$script:Config` kept the path string and
+  `$Config.services` threw `PropertyNotFoundException`. The throw landed in the
+  `foreach` header of the monitoring loop, so the body was skipped for every
+  service while the loop kept spinning: the watchdog stayed alive and held a
+  valid PID file, nothing was logged, and every service silently lost its
+  auto-restart. The parameter is now `-ConfigPath`; the new integration tests in
+  `tests/Integration/Watchdog.Tests.ps1` fail against the old name.
+
 ## [1.0.2] - 2026-10-17
 
 ### Fixed

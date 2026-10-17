@@ -25,9 +25,29 @@ LONG DESCRIPTION
         pp2 restart [name]             Restart services
         pp2 logs <name>                View service logs
         pp2 monit [name]               Multi-pane log viewer (Windows Terminal)
+        pp2 list                       List service names
+        pp2 show <name>                Show one service definition
+        pp2 add <name> -Field @{...}   Add a service
+        pp2 set <name> <field> <value> Change a single field
+        pp2 remove <name>              Remove a service
+        pp2 config                     Open services.json in an editor
         pp2 watchdog-start             Start auto-restart monitor
         pp2 watchdog-stop              Stop auto-restart monitor
+        pp2 watchdog-status            Check watchdog status
         pp2 startup-install            Add to Windows startup
+        pp2 startup-uninstall          Remove from Windows startup
+
+    CONFIG EDITS
+        add, set and remove rewrite services.json. They change the stored
+        configuration only; a service that is already running keeps the
+        settings it was launched with until it is restarted. Pass -Restart to
+        restart the affected services, and -Force to skip the confirmation
+        prompt shown when the target is running.
+
+        pp2 set web maxRetries 5
+        pp2 set web autoRestart true -Restart
+        pp2 add web -Field @{command='npx'; arguments=@('-y','http-server')}
+        pp2 remove web -Purge
 
 SEE ALSO
     https://github.com/john-walks-slow/pp2

@@ -121,6 +121,407 @@ function Get-ServiceProperty($Service, [string]$PropertyName, $Default = $null) 
   return $Default
 }
 
+function Save-Pp2Config {
+  <#
+  .SYNOPSIS
+    Write $script:Config back to services.json.
+
+  .DESCRIPTION
+    Writes through a temporary file and then moves it into place, so an
+    interrupted save leaves the previous config intact rather than a truncated
+    one. The move is atomic on the same volume, which the temp file guarantees.
+
+    -Depth is passed explicitly and generously: ConvertTo-Json defaults to 2,
+    which silently truncates a nested object such as env or settings into the
+    string "System.Collections.Specialized.OrderedDictionary" and would corrupt
+    the user's config on the first edit.
+
+    NoNewline keeps the trailing newline off, matching how the file is written
+    on creation; Set-Content -Encoding UTF8 is BOM-less on PowerShell 7, which
+    is what a hand-edited services.json looks like.
+  #>
+  $Json = $script:Config | ConvertTo-Json -Depth 32
+  $Temp = "$($script:ConfigPath).tmp"
+  Set-Content -Path $Temp -Value $Json -Encoding UTF8 -NoNewline
+  Move-Item -Path $Temp -Destination $script:ConfigPath -Force
+}
+
+function Test-ServiceDefinition {
+  <#
+  .SYNOPSIS
+    Validate a service definition before it is written to disk.
+
+  .DESCRIPTION
+    Editing the config persists whatever it is given, so a typo that pp2 start
+    would have caught on the next run would instead sit in services.json until
+    then. Catch it at the point of the edit, where the user still has the
+    command in front of them.
+
+    Every problem is collected and returned rather than thrown on the first, so
+    one call tells the user everything that is wrong. dependsOn is checked
+    against the services currently in the config, which is what the edit will
+    leave behind in every case but a rename.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$Name,
+    [Parameter(Mandatory)]$Service
+  )
+
+  $Errors = @()
+
+  if (-not (Get-ServiceProperty $Service 'command')) {
+    $Errors += "'command' is required"
+  }
+
+  if ((Get-ServiceProperty $Service 'ephemeral' $false) -eq $true -and
+      -not (Get-ServiceProperty $Service 'shutdownCommand')) {
+    $Errors += "'shutdownCommand' is required when 'ephemeral' is true"
+  }
+
+  foreach ($Port in @(Get-ServiceProperty $Service 'ports' @()) | Where-Object { $_ }) {
+    $Parsed = 0
+    if (-not [int]::TryParse([string]$Port, [ref]$Parsed) -or $Parsed -lt 1 -or $Parsed -gt 65535) {
+      $Errors += "'ports' entry '$Port' is not a port number (1-65535)"
+    }
+  }
+
+  # .Name belongs on each property object, not on the collection: under
+  # StrictMode a PSMemberInfoCollection has no Name member and reading it throws.
+  $KnownName = @($script:Config.services.PSObject.Properties | ForEach-Object { $_.Name })
+
+  foreach ($Dependency in @(Get-ServiceProperty $Service 'dependsOn' @()) | Where-Object { $_ }) {
+    if ($Dependency -eq $Name) { $Errors += "'dependsOn' cannot reference the service itself"; continue }
+    if ($Dependency -notin $KnownName) { $Errors += "'dependsOn' references unknown service '$Dependency'" }
+  }
+
+  return $Errors
+}
+
+function Assert-ServiceName {
+  <#
+  .SYNOPSIS
+    Reject a service name that pp2 cannot represent on disk.
+
+  .DESCRIPTION
+    A service name becomes a filename in run/ and logs/ (<name>.pid,
+    <name>.out.log), and the watchdog rebuilds its restart command by quoting
+    the name into a PowerShell string literal. Restricting the character set
+    keeps both of those safe without escaping gymnastics.
+  #>
+  param([Parameter(Mandatory)][string]$Name)
+
+  if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+    throw "Invalid service name '$Name': use letters, digits, dot, underscore or dash, starting with a letter or digit."
+  }
+}
+
+function Get-ServiceFieldType {
+  <#
+  .SYNOPSIS
+    The JSON type a service field is expected to hold.
+
+  .DESCRIPTION
+    `pp2 set` takes its value from the command line, where everything is a
+    string. Without this the first edit would turn a numeric port into "3000"
+    and a boolean into "true", and the config would hold strings where the rest
+    of pp2 compares against $true or casts to [int].
+
+    An unknown field is typed as 'any' rather than rejected: pp2 ignores
+    fields it does not know, and refusing to set one would block forward
+    compatibility with a hand-written config.
+  #>
+  param([Parameter(Mandatory)][string]$FieldName)
+
+  switch ($FieldName) {
+    'arguments' { return 'array' }
+    'ports' { return 'intarray' }
+    'dependsOn' { return 'stringarray' }
+    'shutdownArguments' { return 'array' }
+    'env' { return 'object' }
+    'shell' { return 'bool' }
+    'ephemeral' { return 'bool' }
+    'autoRestart' { return 'bool' }
+    'elevated' { return 'bool' }
+    'inheritEnv' { return 'bool' }
+    'enable' { return 'bool' }
+    'maxRetries' { return 'int' }
+    'command' { return 'string' }
+    'displayName' { return 'string' }
+    'description' { return 'string' }
+    'workingDirectory' { return 'string' }
+    'shutdownCommand' { return 'string' }
+    'legacyProcessName' { return 'string' }
+    default { return 'any' }
+  }
+}
+
+function ConvertTo-FieldValue {
+  <#
+  .SYNOPSIS
+    Coerce a command-line value into the JSON type a service field expects.
+
+  .DESCRIPTION
+    Arrays accept either a JSON array or a comma-separated list, because
+    `pp2 set web ports 3000,3001` is what a PowerShell user types while
+    `pp2 set web arguments '["-y","http-server"]'` is what survives quoting.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$FieldName,
+    [AllowNull()]$Value
+  )
+
+  $Type = Get-ServiceFieldType $FieldName
+  # A plain assignment, not an if-expression: the latter unrolls a one-element
+  # array, so passing @('a') through here would arrive as the string 'a'.
+  $Raw = $Value
+  if ($Value -is [string]) { $Raw = $Value.Trim() }
+
+  switch ($Type) {
+    'bool' {
+      if ($Raw -is [bool]) { return $Raw }
+      $Text = ([string]$Raw).ToLowerInvariant()
+      if ($Text -in @('true', '$true', '1', 'yes', 'on')) { return $true }
+      if ($Text -in @('false', '$false', '0', 'no', 'off')) { return $false }
+      throw "'$FieldName' expects true or false, got '$Value'"
+    }
+    'int' {
+      $Parsed = 0
+      if (-not [int]::TryParse([string]$Raw, [ref]$Parsed)) { throw "'$FieldName' expects a number, got '$Value'" }
+      return $Parsed
+    }
+    'intarray' {
+      $Items = if ($Raw -is [string] -and $Raw.TrimStart().StartsWith('[')) {
+        try { @($Raw | ConvertFrom-Json) } catch { throw "'$FieldName' is not a valid JSON array: $($_.Exception.Message)" }
+      }
+      else { @($Raw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }) }
+
+      # The leading comma is load-bearing: returning the array directly unrolls
+      # a single element, and `pp2 set web ports 8080` would write 8080 rather
+      # than [8080] -- a scalar where every other writer puts an array.
+      return , @($Items | ForEach-Object {
+          $Parsed = 0
+          if (-not [int]::TryParse([string]$_, [ref]$Parsed)) { throw "'$FieldName' expects port numbers, got '$_'" }
+          $Parsed
+        })
+    }
+    'stringarray' {
+      if ($Raw -is [string] -and $Raw.TrimStart().StartsWith('[')) {
+        try { return , @($Raw | ConvertFrom-Json) } catch { throw "'$FieldName' is not a valid JSON array: $($_.Exception.Message)" }
+      }
+      return , @($Raw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    }
+    'array' {
+      if ($Raw -is [string] -and $Raw.TrimStart().StartsWith('[')) {
+        try { return , @($Raw | ConvertFrom-Json) } catch { throw "'$FieldName' is not a valid JSON array: $($_.Exception.Message)" }
+      }
+      return , @($Raw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    }
+    'object' {
+      if ($Raw -is [hashtable]) { return $Raw }
+      try { return ($Raw | ConvertFrom-Json -ErrorAction Stop) }
+      catch { throw "'$FieldName' expects a JSON object, e.g. '{`"PORT`":3000}', got '$Value'" }
+    }
+    'string' { return [string]$Raw }
+    default {
+      # Unknown field: take the JSON reading when it parses, so a hand-added
+      # array or object field stays structured instead of becoming a string.
+      try { return ($Raw | ConvertFrom-Json -ErrorAction Stop) }
+      catch { return $Raw }
+    }
+  }
+}
+
+function Test-ServiceRunning([string]$ServiceName) {
+  if ($script:Config.services.PSObject.Properties[$ServiceName]) {
+    if (Get-RecordedProcess $ServiceName) { return $true }
+  }
+  # A service removed from the config no longer has a name to look up, but its
+  # PID file is still on disk; treat that as running so the caller warns.
+  return (Test-Path (Get-PidPath $ServiceName))
+}
+
+function Assert-SafeToEdit([string]$ServiceName, [bool]$Force, [string]$Operation) {
+  <#
+  .SYNOPSIS
+    Refuse to rewrite the definition of a running service without confirmation.
+
+  .DESCRIPTION
+    Editing a running service's config does not change the process that is
+    already up: the launch script resolved command/arguments/env when it
+    started. Saying so is more useful than silently accepting an edit that
+    appears to do nothing until the next restart.
+  #>
+  if ($Force -or -not (Test-ServiceRunning $ServiceName)) { return }
+
+  Write-Host "WARNING: $ServiceName is running; $Operation only changes the stored config."
+  Write-Host "         The running process keeps its current settings until you restart it."
+  if ((Read-Host 'Continue? [y/N]') -ne 'y') { throw "Cancelled: $ServiceName is running (pass -Force to skip this prompt)" }
+}
+
+function Invoke-RestartIfRequested {
+  <#
+  .SYNOPSIS
+    Restart the given services, but only when the user asked for it.
+
+  .DESCRIPTION
+    Relying on the switch's default rather than its value means a caller that
+    never bound -Restart cannot enable it by passing anything non-empty.
+  #>
+  param([string[]]$ServiceName, [switch]$Restart)
+
+  if (-not $Restart.IsPresent -or -not $ServiceName) { return }
+  foreach ($Name in $ServiceName) {
+    if (Get-RecordedProcess $Name) { Stop-Many @($Name) }
+  }
+  Start-WatchdogIfNeeded @($ServiceName)
+  Start-Many @($ServiceName) $true
+}
+
+function Add-ServiceConfig {
+  param(
+    [Parameter(Mandatory)][string]$ServiceName,
+    [Parameter(Mandatory)][hashtable]$Field,
+    [bool]$Force,
+    [bool]$Restart = $false
+  )
+
+  Initialize-Pp2Config
+
+  $Existing = $script:Config.services.PSObject.Properties[$ServiceName]
+  if ($Existing -and -not $Force) {
+    throw "Service '$ServiceName' already exists (pass -Force to overwrite it)"
+  }
+  if ($Existing) { Assert-SafeToEdit $ServiceName $Force 'overwriting it' }
+
+  # Built as a PSCustomObject, not left as the caller's hashtable: every reader
+  # in pp2 goes through Get-ServiceProperty, which walks PSObject.Properties
+  # and finds nothing on a hashtable.
+  $NewService = [pscustomobject]$Field
+  foreach ($Key in $Field.Keys) {
+    $Value = $Field[$Key]
+    if ($Value -is [hashtable] -or $Value -is [System.Collections.Specialized.OrderedDictionary]) {
+      $NewService.($Key) = [pscustomobject]$Value
+    }
+  }
+
+  # @() is load-bearing: Test-ServiceDefinition returns a scalar when there is
+  # exactly one problem, and .Count on a string throws under StrictMode.
+  $Errors = @(Test-ServiceDefinition $ServiceName $NewService)
+  if ($Errors.Count -gt 0) { throw "Invalid service '$ServiceName': $($Errors -join '; ')" }
+
+  $script:Config.services | Add-Member -MemberType NoteProperty -Name $ServiceName `
+    -Value $NewService -Force
+  Save-Pp2Config
+
+  $Action = if ($Existing) { 'updated' } else { 'added' }
+  Write-Host "$Action service $ServiceName"
+  Invoke-RestartIfRequested @($ServiceName) -Restart:$Restart
+}
+
+function Set-ServiceConfigField {
+  param(
+    [Parameter(Mandatory)][string]$ServiceName,
+    [Parameter(Mandatory)][string]$FieldName,
+    [Parameter(Mandatory)][AllowNull()]$Value,
+    [bool]$Force,
+    [bool]$Restart = $false
+  )
+
+  Initialize-Pp2Config
+  $Service = Get-ServiceConfig $ServiceName
+
+  $FieldType = Get-ServiceFieldType $FieldName
+  if ($FieldType -eq 'any' -and -not $Force) {
+    throw "Unknown field '$FieldName' for service '$ServiceName' (pass -Force to set it anyway)"
+  }
+
+  $Coerced = ConvertTo-FieldValue $FieldName $Value
+
+  Assert-SafeToEdit $ServiceName $Force "$FieldName changed"
+
+  $Current = $Service.PSObject.Properties[$FieldName]
+  # Assigning an if-expression unrolls a one-element array, so `ports = @(8080)`
+  # would come back as the scalar 8080 and print as such. Reading through a
+  # plain assignment keeps the shape.
+  $OldValue = $null
+  if ($Current) { $OldValue = $Current.Value }
+
+  # Copy the definition as a PSCustomObject so the validator can read it the
+  # same way it reads a service from the config.
+  $Pending = [pscustomobject]@{}
+  foreach ($Property in $Service.PSObject.Properties) {
+    $Pending | Add-Member -MemberType NoteProperty -Name $Property.Name -Value $Property.Value
+  }
+  $Pending | Add-Member -MemberType NoteProperty -Name $FieldName -Value $Coerced -Force
+
+  $Errors = @(Test-ServiceDefinition $ServiceName $Pending)
+  if ($Errors.Count -gt 0) { throw "Invalid value for '$FieldName': $($Errors -join '; ')" }
+
+  $Service | Add-Member -MemberType NoteProperty -Name $FieldName -Value $Coerced -Force
+  Save-Pp2Config
+
+  # Rendered through ConvertTo-Json rather than string interpolation so an
+  # array field shows as [9090] instead of the PowerShell-default "9090".
+  $Old = if ($null -eq $OldValue) { '(not set)' } else { ConvertTo-Json -InputObject $OldValue -Compress -Depth 32 }
+  $New = ConvertTo-Json -InputObject $Coerced -Compress -Depth 32
+  Write-Host "set $ServiceName.$FieldName = $New (was $Old)"
+  Invoke-RestartIfRequested @($ServiceName) -Restart:$Restart
+}
+
+function Remove-ServiceConfig {
+  param(
+    [Parameter(Mandatory)][string[]]$ServiceName,
+    [switch]$Purge,
+    [bool]$Force,
+    [bool]$Restart = $false
+  )
+
+  Initialize-Pp2Config
+
+  $ToRemove = @()
+  foreach ($Name in $ServiceName) {
+    if (-not $script:Config.services.PSObject.Properties[$Name]) {
+      Write-Warning "Unknown service: $Name (skipped)"
+      continue
+    }
+    $ToRemove += $Name
+  }
+  if ($ToRemove.Count -eq 0) { throw 'No services were removed' }
+
+  $Running = @($ToRemove | Where-Object { Get-RecordedProcess $_ })
+  if ($Running.Count -gt 0 -and -not $Force) {
+    Write-Host "WARNING: these services are running and will be stopped: $($Running -join ', ')"
+    if ((Read-Host 'Continue? [y/N]') -ne 'y') { throw 'Cancelled (pass -Force to skip this prompt)' }
+  }
+  foreach ($Name in $Running) { Stop-Many @($Name) }
+
+  # Stop the services a removed one depends on? No: dependencies are a start
+  # ordering, not ownership. Only the named services go.
+  foreach ($Name in $ToRemove) {
+    $script:Config.services.PSObject.Properties.Remove($Name) | Out-Null
+    if ($Purge) {
+      Remove-ServiceState $Name
+      Remove-Item (Get-OutLog $Name), (Get-ErrLog $Name) -ErrorAction SilentlyContinue
+    }
+  }
+  Save-Pp2Config
+
+  # Dependents of a removed service can no longer start; point at them now
+  # rather than letting `pp2 start` fail later with a bare "Unknown service".
+  $Orphans = @()
+  foreach ($Property in $script:Config.services.PSObject.Properties) {
+    $DependsOn = @(Get-ServiceProperty $Property.Value 'dependsOn' @()) | Where-Object { $_ }
+    foreach ($Name in $ToRemove) {
+      if ($Name -in $DependsOn) { $Orphans += "$($Property.Name) -> $Name" }
+    }
+  }
+  if ($Orphans.Count -gt 0) {
+    Write-Warning "these services still depend on what was removed: $($Orphans -join ', ')"
+  }
+
+  Write-Host "removed service(s): $($ToRemove -join ', ')$(if ($Purge) { ' (state and logs purged)' })"
+}
+
 function Open-ConfigFile {
   <#
   .SYNOPSIS
@@ -625,7 +1026,7 @@ function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
     Remove-Item $WatchPidPath -ErrorAction SilentlyContinue
   }
 
-  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ModuleRoot 'lib/pp2-watchdog.ps1'), '-Interval', $Interval, '-Root', $Root, '-Config', $script:ConfigPath) -WindowStyle Hidden -PassThru
+  $Process = Start-Process -FilePath (Get-PwshPath) -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ModuleRoot 'lib/pp2-watchdog.ps1'), '-Interval', $Interval, '-Root', $Root, '-ConfigPath', $script:ConfigPath) -WindowStyle Hidden -PassThru
   Set-Content -Path $TempPidPath -Value $Process.Id -NoNewline
   Start-Sleep -Milliseconds 500
 
@@ -810,6 +1211,37 @@ function Set-DefaultDisplayProperty {
   $InputObject | Add-Member -MemberType MemberSet -Name PSStandardMembers `
     -Value ([System.Management.Automation.PSMemberInfo[]]@($Set)) -Force
   return $InputObject
+}
+
+function Show-ServiceConfig {
+  <#
+  .SYNOPSIS
+    Print one service definition as an aligned field/value table.
+
+  .DESCRIPTION
+    ConvertTo-Json is the exact representation and is what -Format json
+    returns, but for reading a single definition the JSON punctuation gets in
+    the way. Values are rendered compactly so a nested env or arguments list
+    stays on one line.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$ServiceName,
+    [Parameter(Mandatory)]$Service
+  )
+
+  $Properties = @($Service.PSObject.Properties)
+  if ($Properties.Count -eq 0) { Write-Host "$ServiceName has no fields"; return }
+
+  $Width = ($Properties.Name | Measure-Object -Property Length -Maximum).Maximum
+  foreach ($Property in $Properties) {
+    $Value = $Property.Value
+    # -InputObject, not a pipe: piping an array enumerates it, so a one-element
+    # list would render as its bare element instead of [8080].
+    $Text = if ($null -eq $Value) { '' }
+    elseif ($Value -is [string]) { $Value }
+    else { ConvertTo-Json -InputObject $Value -Compress -Depth 32 }
+    Write-Host ("  {0,-$Width}  {1}" -f $Property.Name, $Text)
+  }
 }
 
 function Show-Status([string[]]$Name = @('all'), [string]$Format = 'table') {
