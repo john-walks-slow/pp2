@@ -36,9 +36,8 @@
     PrivateData = @{
         PSData = @{
             Tags         = @('powershell', 'process-manager', 'pm2', 'service-manager', 'windows', 'background-process', 'PSEdition_Core')
-            LicenseUri   = 'https://github.com/john-walks-slow/pp2/blob/main/LICENSE'
+            LicenseUri   = 'https://github.com/john-walks-slow/pp2/blob/master/LICENSE'
             ProjectUri   = 'https://github.com/john-walks-slow/pp2'
-            IconUri      = ''
             ReleaseNotes = 'Initial release: PowerShell service manager with dependency handling, auto-restart, and monitoring.'
         }
     }

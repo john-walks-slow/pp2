@@ -14,6 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Ensure PSResourceGet
+        shell: pwsh
+        run: |
+          # build.ps1 publishes with Publish-PSResource (PSResourceGet), which
+          # packs in-process. PowerShellGet v2's Publish-Module shells out to
+          # nuget.exe and parses its stdout with an English-only regex, which
+          # fails on non-English hosts.
+          if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.PSResourceGet)) {
+            Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -Force
+          }
+
       - name: Lint
         shell: pwsh
         run: .\build.ps1 -Lint

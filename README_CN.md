@@ -8,7 +8,8 @@
 
 **pp2 = PowerShell × pm2**
 
-> **当前状态**：代码稳定，48/48 测试通过，仓库已在 GitHub 公开。**尚未发布到 PowerShell Gallery**，当前请使用 Git 克隆安装（见下文）。发布进展：[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases)。
+> **当前状态**：v1.0.0 已发布到 [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2)。
+> 直接用 `Install-Module pp2` 安装，需要 PowerShell 7+。
 
 ## 安装
 
@@ -18,10 +19,32 @@
 - **Windows Terminal**: 可选
 - **sudo for Windows**: 可选，用于 `elevated` 选项 (`winget install gerardog.gsudo`)
 
-### 本地克隆（当前唯一可用方式）
+### PowerShell Gallery（推荐）
 
-模块尚未发布到 PowerShell Gallery。在发布之前，请从公开仓库克隆安装
-（[john-walks-slow/pp2](https://github.com/john-walks-slow/pp2)）：
+```pwsh
+Install-Module -Name pp2 -Repository PSGallery -Scope CurrentUser
+Import-Module pp2
+```
+
+验证安装结果：
+
+```pwsh
+Get-Module pp2 -ListAvailable | Select-Object Name, Version, Path
+pp2 help
+```
+
+如果 `Install-Module` 以 "unable to install... not trusted" 拒绝安装，
+先把 Gallery 标记为受信任（它默认不受信任）：
+
+```pwsh
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+```
+
+若要为所有用户安装，去掉 `-Scope CurrentUser` 并在管理员会话中执行。
+
+### 从源码安装
+
+用于开发，或运行尚未发布的提交：
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
@@ -30,27 +53,13 @@ cd pp2
 ```
 
 `install.ps1` 会把 `src/pp2/` 复制到 `$env:PSModulePath` 中第一个可写目录，
-之后 `Import-Module pp2` 即可在任意 PowerShell 7+ 会话中使用 `pp2` 命令。
+之后 `Import-Module pp2` 即可使用。
 
-| 操作             | 命令                                              |
-| ---------------- | ------------------------------------------------- |
-| 重新安装         | `.\install.ps1 -Force`                           |
-| 卸载             | `.\install.ps1 -Uninstall`                       |
-| 不安装直接运行   | `./pp2.ps1 <action> [name]`（直接使用源码树）    |
-
-### PowerShell Gallery（计划中）
-
-发布到 PSGallery 之后，可以这样安装：
-
-```pwsh
-Install-Module -Name pp2 -Repository PSGallery
-Import-Module pp2
-```
-
-在发布之前执行 `Install-Module -Name pp2` 会报 "Package 'pp2' was not
-found in the PowerShell Gallery"。请在
-[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases)
-跟踪发布状态。
+| 操作             | 命令                                                  |
+| ---------------- | ----------------------------------------------------- |
+| 重新安装         | `.\install.ps1 -Force`                                |
+| 卸载             | `.\install.ps1 -Uninstall`                            |
+| 不安装直接运行   | `./pp2.ps1 <action> [name]`（直接使用源码树）         |
 
 ## 快速开始
 
@@ -301,13 +310,14 @@ PID 跟踪在配置目录下的 `run/` 子目录：
 
 ## 发布
 
-版本历史：[CHANGELOG.md](CHANGELOG.md)。GitHub 标签发布在
-[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases)，
-每次发布都经过
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml)
-构建与测试。
+版本历史：[CHANGELOG.md](CHANGELOG.md)。已发布版本：
 
-未来的 `v1.0.0` 标签会通过
-[`.github/workflows/publish.yml`](.github/workflows/publish.yml)
-将模块发布到 PowerShell Gallery。在此之前执行 `Install-Module -Name pp2`
-会返回 "Package not found"——请使用上面的"本地克隆"安装方式。
+| 版本  | 渠道                                                          |
+| ----- | ------------------------------------------------------------- |
+| 1.0.0 | [PSGallery](https://www.powershellgallery.com/packages/pp2)    |
+
+GitHub 标签发布在
+[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases)。
+推送 `v*` 标签会触发
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml)，
+依次执行 lint、测试，并把构建产物发布到 Gallery。

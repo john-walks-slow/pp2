@@ -104,7 +104,21 @@ function Step-Publish {
     $Psd1Path = Join-Path $StagingDir "$ModuleName.psd1"
     if (-not (Test-Path $Psd1Path)) { throw "Build output not found. Run -Build first." }
 
-    Publish-Module -Path $StagingDir -NuGetApiKey $NuGetApiKey -Repository $Repository -Force
+    # Publish from the staging directory, never from src/. Staging has already
+    # had the dev-only files stripped; publishing src/ directly would ship
+    # PSScriptAnalyzerSettings.psd1 and services.example.json to consumers.
+    #
+    # Publish-PSResource (PSResourceGet) is used instead of Publish-Module
+    # (PowerShellGet v2): the latter shells out to nuget.exe and parses its
+    # stdout with a hardcoded English regex, which breaks on non-English
+    # Windows ("Cannot index into a null array"). PSResourceGet packs
+    # in-process and is locale-independent.
+    if (-not (Get-Module -ListAvailable -Name Microsoft.PowerShell.PSResourceGet)) {
+        throw "Microsoft.PowerShell.PSResourceGet is required to publish. Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser"
+    }
+    Import-Module Microsoft.PowerShell.PSResourceGet -ErrorAction Stop
+
+    Publish-PSResource -Path $StagingDir -ApiKey $NuGetApiKey -Repository $Repository -SkipDependenciesCheck
     Write-Host "  Published $ModuleName v$Version to $Repository" -ForegroundColor Green
 }
 

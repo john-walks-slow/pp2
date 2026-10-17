@@ -8,9 +8,8 @@ PowerShell-based service manager for managing background processes with dependen
 
 **pp2 = PowerShell × pm2**
 
-> **Status:** stable, 48/48 tests passing, public on GitHub. **Not yet on
-> the PowerShell Gallery** — install from a clone for now (see below).
-> Track publication: [github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases).
+> **Status:** v1.0.0 published to the [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2).
+> Install with `Install-Module pp2`. Requires PowerShell 7+.
 
 ## Installation
 
@@ -20,11 +19,33 @@ PowerShell-based service manager for managing background processes with dependen
 - **Windows Terminal**: Optional
 - **sudo for Windows**: Optional for `elevated` option (`winget install gerardog.gsudo`)
 
-### Local clone (currently the only way to get it)
+### PowerShell Gallery (recommended)
 
-The module is not yet published to the PowerShell Gallery. Until it is,
-install it from a clone of the public GitHub repository
-([john-walks-slow/pp2](https://github.com/john-walks-slow/pp2)):
+```pwsh
+Install-Module -Name pp2 -Repository PSGallery -Scope CurrentUser
+Import-Module pp2
+```
+
+Verify what you got:
+
+```pwsh
+Get-Module pp2 -ListAvailable | Select-Object Name, Version, Path
+pp2 help
+```
+
+If `Install-Module` refuses with "unable to install... not trusted", mark the
+gallery trusted first (it ships untrusted by default):
+
+```pwsh
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+```
+
+To install for all users instead, drop `-Scope CurrentUser` and run from an
+elevated session.
+
+### From source
+
+For development, or to run unreleased commits:
 
 ```pwsh
 git clone https://github.com/john-walks-slow/pp2.git
@@ -33,27 +54,13 @@ cd pp2
 ```
 
 `install.ps1` copies `src/pp2/` into the first writable directory in
-`$env:PSModulePath`, so `Import-Module pp2` works afterwards. The
-`pp2` command is then available in any PowerShell 7+ session.
+`$env:PSModulePath`, so `Import-Module pp2` works afterwards.
 
-| Action                 | Command                                          |
-| ---------------------- | ------------------------------------------------ |
-| Reinstall              | `.\install.ps1 -Force`                           |
-| Uninstall              | `.\install.ps1 -Uninstall`                       |
-| Run without installing | `./pp2.ps1 <action> [name]` (uses the source tree directly) |
-
-### PowerShell Gallery (planned)
-
-Once a release is published to PSGallery:
-
-```pwsh
-Install-Module -Name pp2 -Repository PSGallery
-Import-Module pp2
-```
-
-Until then `Install-Module -Name pp2` will fail with "Package 'pp2' was
-not found in the PowerShell Gallery". Track publication status at
-[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases).
+| Action                 | Command                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| Reinstall              | `.\install.ps1 -Force`                                       |
+| Uninstall              | `.\install.ps1 -Uninstall`                                   |
+| Run without installing | `./pp2.ps1 <action> [name]` (uses the source tree directly)  |
 
 ## Quick Start
 
@@ -317,11 +324,13 @@ Services with `dependsOn` start in correct order. Stop operations use reverse de
 
 **`pp2` is not found after install:**
 
-- `Install-Module pp2 -Scope CurrentUser` requires PowerShell 7+ and
-  PowerShellGet 2.x. Check `$PSVersionTable.PSVersion` and run
-  `Install-Module -Name PowerShellGet -Force` if needed.
+- `Install-Module pp2` requires PowerShell 7+ (the module declares
+  `PowerShellVersion = '7.0'` and `CompatiblePSEditions = 'Core'`). Check
+  `$PSVersionTable.PSVersion`; Windows PowerShell 5.1 is not supported.
 - If you installed with `-Scope AllUsers`, restart the shell so the new
   `PSModulePath` is picked up.
+- If you are behind a proxy, `Install-Module` needs it set for the current
+  session: `$env:HTTP_PROXY` / `$env:HTTPS_PROXY`.
 
 **`PP2_HOME` is ignored between commands:**
 
@@ -332,11 +341,13 @@ Services with `dependsOn` start in correct order. Stop operations use reverse de
 
 ## Releases
 
-Version history lives in [CHANGELOG.md](CHANGELOG.md). Tagged GitHub
-releases are at [github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases);
-each release is built and tested by
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+Version history lives in [CHANGELOG.md](CHANGELOG.md). Published versions:
 
-A future `v1.0.0` tag will also publish the module to the PowerShell
-Gallery via [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
-Until that happens `Install-Module -Name pp2` returns "Package not found" — use the local-clone install path above.
+| Version | Where                                                        |
+| ------- | ------------------------------------------------------------ |
+| 1.0.0   | [PSGallery](https://www.powershellgallery.com/packages/pp2)   |
+
+Tagged GitHub releases are at
+[github.com/john-walks-slow/pp2/releases](https://github.com/john-walks-slow/pp2/releases).
+Pushing a `v*` tag runs [`.github/workflows/publish.yml`](.github/workflows/publish.yml),
+which lints, tests, and publishes the built module to the Gallery.
