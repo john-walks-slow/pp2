@@ -8,7 +8,8 @@
 
 **pp2 = PowerShell × pm2**
 
-> **当前状态**：v1.1.0 已发布到 [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2)。
+> **当前状态**：[PowerShell Gallery](https://www.powershellgallery.com/packages/pp2)
+> 上最新为 v1.1.0；源码树为 v1.2.0，尚未发布到 Gallery。
 > 直接用 `Install-Module pp2` 安装，需要 PowerShell 7+。
 
 ## 安装
@@ -53,7 +54,7 @@ cd pp2
 .\build.ps1 -Build
 Register-PSResourceRepository -Name pp2local -Uri D:\psrepo -Trusted
 .\build.ps1 -Build -Publish -Repository pp2local
-Install-PSResource -Name pp2 -Repository pp2local -Trusted
+Install-PSResource -Name pp2 -Repository pp2local
 ```
 
 后续升级使用 `Update-PSResource -Name pp2 -Repository pp2local`。
@@ -162,7 +163,7 @@ pp2 startup-install
 **直接模式 (`shell: false`)** - 默认：
 
 - 每个参数作为独立 token 传递，参数边界精确
-- shell 功能无效（无管道、重定向、通配符、PATH）
+- shell 功能无效（无管道、重定向、通配符）；裸命令名仍会经 PATH 解析
 - 建议用于直接可执行文件
 
 **Shell 模式 (`shell: true`)**：
@@ -296,10 +297,30 @@ pp2 watchdog-status            # 检查 watchdog 状态
 
 ### 启动集成
 
+注册一个登录时运行的任务计划任务。之后的 `pp2 start` 不受影响：任务只负责启动服务，
+不会让 pp2 常驻。
+
 ```pwsh
-pp2 startup-install            # 添加到 Windows 启动（任务计划程序）
-pp2 startup-uninstall          # 从 Windows 启动移除
+pp2 startup-install              # 登录时启动全部服务
+pp2 startup-install dsh          # 只启动 dsh（任务名 "pp2 Startup (dsh)"）
+pp2 startup-install dsh,cpa      # 启动指定的一组服务
+pp2 startup-uninstall dsh        # 删除该任务
+pp2 startup-uninstall            # 删除所有 "pp2 Startup*" 任务
 ```
+
+说明：
+
+- 任务以当前用户的普通权限运行，无需管理员终端即可注册。定义里写了
+  `elevated: true` 的服务，由 pp2 在启动时自行提权。
+- 任务按模块名导入 pp2，因此后续 `Update-PSResource` 升级后仍然生效。
+  若当前是从源码树导入 pp2，则拒绝注册——请先安装 pp2，让任务加载同一份副本。
+- 任务在电池供电时不会停止。
+- 指定服务子集时不会连带启动其 `dependsOn` 依赖。依赖未运行时该服务会拒绝启动，
+  需要一起启动就把依赖也列进去（如 `dsh,db`）。
+- 任务拉起的 watchdog 只监视这个子集，因此上次会话残留的 PID 文件不会把未指定的
+  服务复活。
+- 端口已被其它进程占用时，服务会被跳过：登录时没有控制台可以回答"是否结束该进程"。
+  需要接管时，手工执行 `pp2 start <name> -Force`。
 
 ### 参数选项
 
@@ -313,6 +334,30 @@ pp2 startup-uninstall          # 从 Windows 启动移除
 -Purge                         # （remove）连带删除状态文件与日志
 -Config <path>                 # 使用指定的 services.json 文件
 ```
+
+## Agent Skill
+
+[`skills/pp2/SKILL.md`](skills/pp2/SKILL.md) 教编码 agent 何时以及如何调用 pp2：
+哪些命令可以无人值守运行、如何读状态与日志、`services.json` 中真正重要的字段，
+以及"改了配置不生效""自动重启没反应"这类高频坑。
+
+Claude Code 只自动发现 `.claude/skills/<name>/` 下的 skill，所以仓库里这份是分发副本，
+需要安装一次。装到个人 skills 目录后所有项目都能用：
+
+```pwsh
+# Windows：目录联接，仓库内修改立即生效
+New-Item -ItemType Junction -Path "$HOME\.claude\skills\pp2" `
+  -Target (Resolve-Path .\skills\pp2)
+```
+
+只在某个项目里用时，也可以把项目级 skill 目录指过去：
+
+```pwsh
+New-Item -ItemType Junction -Path .\.claude\skills -Target (Resolve-Path .\skills)
+```
+
+其他平台用符号链接（`ln -s`）。该 skill 就是一份标准 `SKILL.md`，同样适用于
+其他支持此格式的 agent 宿主。
 
 ## 日志管理
 

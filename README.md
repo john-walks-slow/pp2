@@ -8,7 +8,9 @@ PowerShell-based service manager for managing background processes with dependen
 
 **pp2 = PowerShell × pm2**
 
-> **Status:** v1.1.0 published to the [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2).
+> **Status:** v1.1.0 is the latest release on the
+> [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2); the
+> source tree is v1.2.0 and is not on the Gallery yet.
 > Install with `Install-Module pp2`. Requires PowerShell 7+.
 
 ## Installation
@@ -55,7 +57,7 @@ cd pp2
 .\build.ps1 -Build
 Register-PSResourceRepository -Name pp2local -Uri D:\psrepo -Trusted
 .\build.ps1 -Build -Publish -Repository pp2local
-Install-PSResource -Name pp2 -Repository pp2local -Trusted
+Install-PSResource -Name pp2 -Repository pp2local
 ```
 
 Upgrade later with `Update-PSResource -Name pp2 -Repository pp2local`.
@@ -167,7 +169,8 @@ The `shell` option controls command execution:
 **Direct mode (`shell: false`)** - Default:
 
 - Each argument is passed as a separate token; boundaries are preserved
-- No shell features (no pipes, redirects, wildcards, PATH lookup)
+- No shell features (no pipes, redirects, wildcards). A bare command name is
+  still resolved through PATH
 - Recommended for direct executables and Node.js scripts
 
 **Shell mode (`shell: true`)**:
@@ -305,10 +308,34 @@ pp2 watchdog-status            # Check watchdog status
 
 ### Startup Integration
 
+Registers a Task Scheduler job that runs at logon. Later `pp2 start` calls are
+unaffected: the task starts services, it does not keep pp2 resident.
+
 ```pwsh
-pp2 startup-install            # Add to Windows startup (Task Scheduler)
-pp2 startup-uninstall          # Remove from Windows startup
+pp2 startup-install              # Start all services at logon
+pp2 startup-install dsh          # Start only dsh (task name: "pp2 Startup (dsh)")
+pp2 startup-install dsh,cpa      # Start a subset
+pp2 startup-uninstall dsh        # Remove that task
+pp2 startup-uninstall            # Remove every "pp2 Startup*" task
 ```
+
+Notes:
+
+- The task runs at the current user's normal integrity level, so it can be
+  registered without an elevated shell. A service with `elevated: true` is
+  raised by pp2 itself when it starts.
+- The task imports pp2 by module name, so it follows a later `Update-PSResource`.
+  Registering while pp2 is imported straight from a source tree is refused —
+  install pp2 first so the task loads the same copy.
+- The task keeps running on battery power.
+- Starting a subset does not start its `dependsOn` services. If a dependency is
+  not already running, the start is refused — name it too (`dsh,db`) if it
+  should come up with the task.
+- The watchdog started by the task watches only that subset, so a PID file left
+  over from a previous session does not revive services you did not name.
+- A service whose port is already held by a stray process is left alone: there
+  is no console at logon to answer the "kill it?" prompt. Use `-Force` on a
+  manual `pp2 start` to replace the owner interactively.
 
 ### Options
 
@@ -322,6 +349,32 @@ pp2 startup-uninstall          # Remove from Windows startup
 -Purge                         # (remove) also delete state files and logs
 -Config <path>                 # Use specified services.json file
 ```
+
+## Agent Skill
+
+[`skills/pp2/SKILL.md`](skills/pp2/SKILL.md) teaches a coding agent when and how
+to drive pp2: which commands are safe to run unattended, how to read status and
+logs, the `services.json` fields that matter, and the traps around editing a
+running service and auto-restart.
+
+Claude Code only auto-discovers skills under `.claude/skills/<name>/`, so this
+file ships as the distribution copy and has to be installed once. Either link
+it into the personal skills directory (available in every project):
+
+```pwsh
+# Windows: a directory junction means edits in the repo take effect immediately
+New-Item -ItemType Junction -Path "$HOME\.claude\skills\pp2" `
+  -Target (Resolve-Path .\skills\pp2)
+```
+
+or, on a checkout you only use in one project, point the project scope at it:
+
+```pwsh
+New-Item -ItemType Junction -Path .\.claude\skills -Target (Resolve-Path .\skills)
+```
+
+On other platforms use a symlink (`ln -s`). The skill is a plain `SKILL.md`, so
+it also works with any other agent host that reads that format.
 
 ## Log Management
 
