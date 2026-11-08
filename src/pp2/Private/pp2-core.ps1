@@ -1659,31 +1659,51 @@ function New-StartupTaskAction {
     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$Command`""
 }
 
-function Assert-ModuleOnPSModulePath {
+function Test-ModuleRootResolvable {
   <#
   .SYNOPSIS
-    Refuse to register a task that would import a different pp2 copy.
+    Whether importing the module by name would load this copy.
 
   .DESCRIPTION
     The startup task imports pp2 by name. When the current session loaded the
     module straight from a source tree, that name resolves to whatever
     installed copy exists -- or to nothing -- so the task would silently run
-    something else. Fail here, where the user can still act on it.
+    something else.
+
+    PowerShell only looks at <entry>/<name>/<version>/<name>.psd1, so walking
+    up to find a PSModulePath entry would accept a source tree nested anywhere
+    beneath one. Ask PowerShell what that name resolves to, and compare it with
+    the copy that is actually loaded.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$ModuleRoot,
+    [Parameter(Mandatory)][string]$ModuleName,
+    [object[]]$Available
+  )
+
+  $Resolved = [IO.Path]::GetFullPath($ModuleRoot).TrimEnd('\', '/')
+  if ($null -eq $Available) {
+    $Available = @(Get-Module -ListAvailable -Name $ModuleName -ErrorAction SilentlyContinue)
+  }
+
+  foreach ($Candidate in $Available) {
+    $Base = [IO.Path]::GetFullPath($Candidate.ModuleBase).TrimEnd('\', '/')
+    if ($Base.Equals($Resolved, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  }
+  return $false
+}
+
+function Assert-ModuleOnPSModulePath {
+  <#
+  .SYNOPSIS
+    Refuse to register a task that would import a different pp2 copy.
   #>
   param(
     [Parameter(Mandatory)][string]$ModuleRoot,
     [Parameter(Mandatory)][string]$ModuleName
   )
 
-  # PowerShell only looks at <entry>/<name>/<version>/<name>.psd1, so walking
-  # up to find a PSModulePath entry would accept a source tree nested anywhere
-  # beneath one. Ask PowerShell itself what that name resolves to.
-  $Resolved = [IO.Path]::GetFullPath($ModuleRoot).TrimEnd('\', '/')
-  $Candidates = @(Get-Module -ListAvailable -Name $ModuleName -ErrorAction SilentlyContinue)
-  foreach ($Candidate in $Candidates) {
-    $Base = [IO.Path]::GetFullPath($Candidate.ModuleBase).TrimEnd('\', '/')
-    if ($Base.Equals($Resolved, [StringComparison]::OrdinalIgnoreCase)) { return }
-  }
+  if (Test-ModuleRootResolvable -ModuleRoot $ModuleRoot -ModuleName $ModuleName) { return }
 
   throw "pp2 is loaded from '$ModuleRoot', which is not the copy Import-Module resolves on its own. Install pp2 (Install-PSResource pp2) and register startup from that copy, so the task loads the same module."
 }

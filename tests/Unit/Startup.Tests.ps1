@@ -99,26 +99,56 @@ Describe 'Startup task action' {
 }
 
 Describe 'Startup module resolution' {
-    It 'accepts the module base PowerShell itself resolves for the name' {
-        $ModuleBases = & (Get-Module pp2) {
-            @(Get-Module -ListAvailable -Name pp2 | ForEach-Object { $_.ModuleBase })
-        }
-        $ModuleBases | Should -Not -BeNullOrEmpty
+    # The candidate list is injected so these cases do not depend on pp2 being
+    # installed on the machine, which CI (and a fresh clone) does not guarantee.
+    BeforeAll {
+        $script:InstalledBase = Join-Path ([IO.Path]::GetTempPath()) 'mods/pp2/1.2.0'
+        $script:Installed = @([pscustomobject]@{ ModuleBase = $script:InstalledBase })
+    }
 
-        {
-            & (Get-Module pp2) {
-                param($Path) Assert-ModuleOnPSModulePath -ModuleRoot $Path -ModuleName pp2
-            } $ModuleBases[0]
-        } | Should -Not -Throw
+    It 'accepts the copy PowerShell resolves for the name' {
+        $Accepted = & (Get-Module pp2) {
+            param($Root, $Avail)
+            Test-ModuleRootResolvable -ModuleRoot $Root -ModuleName pp2 -Available $Avail
+        } $script:InstalledBase $script:Installed
+
+        $Accepted | Should -BeTrue
+    }
+
+    It 'ignores case and a trailing separator in the module root' {
+        $Accepted = & (Get-Module pp2) {
+            param($Root, $Avail)
+            Test-ModuleRootResolvable -ModuleRoot $Root -ModuleName pp2 -Available $Avail
+        } ($script:InstalledBase.ToUpper() + '\') $script:Installed
+
+        $Accepted | Should -BeTrue
     }
 
     It 'refuses a path that merely sits beneath a PSModulePath entry' {
-        # Walking up to a PSModulePath entry would accept any nested directory
-        # (e.g. a clone under a module root), but Import-Module looks only at
-        # <entry>/<name>/<version>/, so the task would fail at logon.
+        # Walking up to find a PSModulePath entry would accept any nested
+        # directory (e.g. a clone under a module root), but Import-Module looks
+        # only at <entry>/<name>/<version>/, so the task would fail at logon.
+        $Accepted = & (Get-Module pp2) {
+            param($Root, $Avail)
+            Test-ModuleRootResolvable -ModuleRoot $Root -ModuleName pp2 -Available $Avail
+        } (Join-Path $script:InstalledBase 'src/pp2') $script:Installed
+
+        $Accepted | Should -BeFalse
+    }
+
+    It 'refuses when the name resolves to nothing' {
+        $Accepted = & (Get-Module pp2) {
+            param($Root, $Avail)
+            Test-ModuleRootResolvable -ModuleRoot $Root -ModuleName pp2 -Available $Avail
+        } $script:InstalledBase @()
+
+        $Accepted | Should -BeFalse
+    }
+
+    It 'reports the failure through Assert-ModuleOnPSModulePath' {
         {
             & (Get-Module pp2) {
-                param($Path) Assert-ModuleOnPSModulePath -ModuleRoot $Path -ModuleName pp2
+                param($Root) Assert-ModuleOnPSModulePath -ModuleRoot $Root -ModuleName pp2
             } (Join-Path ([IO.Path]::GetTempPath()) 'pp2-checkout/src/pp2')
         } | Should -Throw '*not the copy Import-Module resolves*'
     }
