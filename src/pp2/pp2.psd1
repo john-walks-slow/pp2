@@ -1,6 +1,6 @@
 @{
     RootModule           = 'pp2.psm1'
-    ModuleVersion        = '1.1.0'
+    ModuleVersion        = '1.2.0'
     GUID                 = '6e5b2c1a-8f4d-4a3e-9b7c-2d1f0e8a6c4b'
     Author               = 'JohnnRen'
     CompanyName          = 'JohnnRen'
@@ -42,7 +42,7 @@
             Tags         = @('powershell', 'process-manager', 'pm2', 'service-manager', 'windows', 'background-process', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/john-walks-slow/pp2/blob/master/LICENSE'
             ProjectUri   = 'https://github.com/john-walks-slow/pp2'
-            ReleaseNotes = 'Config-editing commands (show/add/set/remove) with validation and optional -Restart; fixes the watchdog regression that stopped auto-restart from working.'
+            ReleaseNotes = 'startup-install now takes service names (e.g. pp2 startup-install dsh) and no longer registers a Highest task, so it works from a non-elevated shell; a failed registration is reported instead of printing success.'
         }
     }
 

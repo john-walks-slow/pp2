@@ -78,6 +78,44 @@ Describe 'Watchdog auto-restart' {
         (Get-Content $LogPath -Raw) | Should -Match 'watchdog started.*interval=3'
     }
 
+    It 'leaves services it was not started for alone' {
+        # A PID file left behind by a service that was running before the
+        # machine went down used to make the watchdog revive it at logon, even
+        # when the logon task asked for one service only.
+        $TestHome = New-Pp2TestHome -Settings @{ watchdogInterval = 2; startupVerifyWait = 8000 } -Services ([ordered]@{
+                wanted   = @{ command = 'pwsh'; arguments = @('-NoProfile', '-Command', 'while ($true) { Start-Sleep -Seconds 1 }'); autoRestart = $true }
+                leftover = @{ command = 'pwsh'; arguments = @('-NoProfile', '-Command', 'exit 0'); autoRestart = $true }
+            })
+
+        # A stale PID file: the process it names is gone.
+        $Dead = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', 'exit 0') -PassThru -Wait
+        New-Item -ItemType Directory -Path (Join-Path $TestHome 'run') -Force | Out-Null
+        Set-Content (Join-Path $TestHome 'run\leftover.pid') -Value $Dead.Id -NoNewline
+
+        pp2 start wanted *> $null
+
+        $LogPath = Join-Path $TestHome 'logs\watchdog.log'
+        Start-Sleep -Seconds 7
+
+        $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { '' }
+        $Log | Should -Not -Match 'leftover crashed'
+        $Log | Should -Not -Match 'auto-restarting leftover'
+    }
+
+    It 'stops watching a service once it is stopped' {
+        $TestHome = New-Pp2TestHome -Settings @{ watchdogInterval = 2; startupVerifyWait = 8000 } -Services ([ordered]@{
+                wanted = @{ command = 'pwsh'; arguments = @('-NoProfile', '-Command', 'while ($true) { Start-Sleep -Seconds 1 }'); autoRestart = $true }
+            })
+
+        pp2 start wanted *> $null
+        pp2 stop wanted *> $null
+        Start-Sleep -Seconds 6
+
+        $LogPath = Join-Path $TestHome 'logs\watchdog.log'
+        $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { '' }
+        $Log | Should -Not -Match 'wanted crashed'
+    }
+
     It 'keeps running after a settings lookup' {
         # The loop aborted on the first Get-Setting throw, so "the watchdog
         # process still exists" is not enough -- assert it is still doing its

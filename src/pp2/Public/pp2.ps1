@@ -53,6 +53,14 @@ function pp2 {
     # cannot mean two services: 'b' lands in $Field. Rather than act on half the
     # request, each action declares what it accepts and a stray argument is
     # rejected. remove takes a comma-separated list.
+    if ($Action -in @('startup-install', 'startup-uninstall') -and
+        $PSBoundParameters.ContainsKey('Field')) {
+        # Same reasoning as the config commands: a positional [string[]]
+        # binds one argument, so `pp2 startup-install a b` would drop 'b'
+        # instead of starting both. Reject it rather than half-run it.
+        throw "$Action takes a comma-separated list, e.g. pp2 $Action a,b"
+    }
+
     if ($Action -in @('add', 'remove', 'set', 'show')) {
         $Names = @($Name | Where-Object { $_ -ne 'all' })
         if ($Names.Count -eq 0) { throw "$Action requires a service name" }
@@ -115,8 +123,9 @@ Watchdog Control:
   watchdog-status            Check watchdog status
 
 Startup Control:
-  startup-install            Add to Windows startup
-  startup-uninstall          Remove from Windows startup
+  startup-install [name]     Add to Windows startup (default: all services)
+  startup-uninstall [name]   Remove one startup task (default: all of them)
+                             name may be a comma list; 'all' cannot be mixed
 
 Options:
   -Watch                     Live monitoring mode (for status/logs)
@@ -138,6 +147,8 @@ Examples:
   pp2 add web -Field @{command='npx'; arguments=@('-y','http-server'); ports=@(8080)}
   pp2 set web autoRestart true -Restart
   pp2 remove web -Purge
+  pp2 startup-install dsh
+  pp2 startup-uninstall dsh
 '@ | Write-Host
         }
         'list' { Get-ServiceNames $Name }
@@ -187,7 +198,20 @@ Examples:
         'watchdog-start' { Start-WatchdogProcess }
         'watchdog-stop' { Stop-Watchdog }
         'watchdog-status' { Show-WatchdogStatus }
-        'startup-install' { Install-StartupTask (Join-Path $script:ModuleRoot 'pp2.psd1') (Get-Pp2Root) $script:ConfigPath }
-        'startup-uninstall' { Uninstall-StartupTask }
+        'startup-install' {
+            # 'all' already means every service; mixing it with names is
+            # ambiguous, and the names would silently win.
+            if (@($Name) -contains 'all' -and @(Get-StartupServiceNames $Name).Count -gt 0) {
+                throw "startup-install takes either 'all' or service names, not both"
+            }
+            $StartupNames = @(Get-StartupServiceNames $Name)
+            if ($StartupNames.Count -gt 0) {
+                # Fail on a typo now rather than at the next logon, when there
+                # is nobody to read the error.
+                [void](Get-ServiceNames $StartupNames)
+            }
+            Install-StartupTask (Join-Path $script:ModuleRoot 'pp2.psd1') (Get-Pp2Root) $script:ConfigPath $Name
+        }
+        'startup-uninstall' { Uninstall-StartupTask $Name }
     }
 }

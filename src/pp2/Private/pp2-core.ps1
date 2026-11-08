@@ -21,7 +21,7 @@ function Initialize-Pp2Context {
   $script:ConfigPath = Join-Path $script:Root 'services.json'
   $script:RunDir = Join-Path $script:Root 'run'
   $script:LogDir = Join-Path $script:Root 'logs'
-  $script:TaskName = 'pp2 Startup'
+  $script:StartupTaskBaseName = 'pp2 Startup'
   $script:ConfigLoaded = $false
   $script:Config = $null
 
@@ -869,6 +869,10 @@ function Get-StopOrder([string[]]$ServiceNames) {
 
 function Stop-One([string]$ServiceName) {
   $Service = Get-ServiceConfig $ServiceName
+  # Drop the service from the watchdog's set first: the watchdog checks on an
+  # interval, and a stop recorded after it looked would be undone by the
+  # restart it scheduled.
+  Stop-Watching @($ServiceName)
   $ProcessOrEphemeral = Get-RecordedProcess $ServiceName
   
   # Handle ephemeral services
@@ -1012,10 +1016,56 @@ function Stop-Watchdog {
   Write-Host "stopped watchdog pid=$WatchPid"
 }
 
-function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
+function Get-WatchedServices {
+  <#
+  .SYNOPSIS
+    The services the running watchdog is responsible for.
+
+  .DESCRIPTION
+    pp2 records the set when it starts the watchdog. Without it the watchdog
+    watched every autoRestart service in the config, so a PID file left behind
+    by a service that was running before the machine went down made the
+    watchdog revive it at the next logon -- even when the logon task asked for
+    one service only.
+  #>
+  $Path = Join-Path $RunDir 'watchdog.services'
+  if (-not (Test-Path $Path)) { return @() }
+  return @(Get-Content $Path | Where-Object { $_ })
+}
+
+function Set-WatchedServices([string[]]$Name) {
+  $Path = Join-Path $RunDir 'watchdog.services'
+  Set-Content -Path $Path -Value ($Name | Sort-Object -Unique) -Encoding UTF8
+}
+
+function Stop-Watching([string[]]$Name) {
+  # A stopped service must not be resurrected by a watchdog that is still
+  # running for the others.
+  $Path = Join-Path $RunDir 'watchdog.services'
+  if (-not (Test-Path $Path)) { return }
+
+  $Remaining = @(Get-Content $Path | Where-Object { $_ -and $_ -notin $Name })
+  if ($Remaining.Count -eq 0) { Remove-Item $Path -ErrorAction SilentlyContinue }
+  else { Set-WatchedServices $Remaining }
+}
+
+function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting, [string[]]$Services) {
   if (-not $Interval) { $Interval = [int](Get-Setting 'watchdogInterval' 60) }
   $WatchPidPath = Join-Path $RunDir 'watchdog.pid'
   $TempPidPath = Join-Path $RunDir 'watchdog.pid.new'
+
+  # Union with the current set: starting another service must not silently
+  # drop the services the running watchdog already covers. A bare
+  # `pp2 watchdog-start` names none, which means every autoRestart service.
+  $Targets = if ($Services) {
+    @($Services) + @(Get-WatchedServices)
+  }
+  else {
+    Initialize-Pp2Config
+    @($script:Config.services.PSObject.Properties.Name |
+      Where-Object { Get-ServiceProperty (Get-ServiceConfig $_) 'autoRestart' $false })
+  }
+  Set-WatchedServices $Targets
 
   if (-not $ReplaceExisting -and (Test-Path $WatchPidPath)) {
     $WatchPid = [int](Get-Content $WatchPidPath -Raw)
@@ -1051,10 +1101,25 @@ function Start-WatchdogProcess([int]$Interval, [switch]$ReplaceExisting) {
 }
 
 function Start-WatchdogIfNeeded([string[]]$Name = @('all')) {
-  $NeedsWatchdog = $null -ne (Get-ServiceNames $Name |
-    Where-Object { Get-ServiceProperty (Get-ServiceConfig $_) 'autoRestart' $false } |
-    Select-Object -First 1)
-  if ($NeedsWatchdog) { Start-WatchdogProcess -ReplaceExisting }
+  $AutoRestart = @(Get-ServiceNames $Name |
+    Where-Object { Get-ServiceProperty (Get-ServiceConfig $_) 'autoRestart' $false })
+  if ($AutoRestart.Count -gt 0) { Start-WatchdogProcess -ReplaceExisting -Services $AutoRestart }
+}
+
+function Test-InteractiveConsole {
+  <#
+  .SYNOPSIS
+    Whether a confirmation prompt can actually be answered.
+
+  .DESCRIPTION
+    A scheduled task runs pwsh hidden with no console attached. Read-Host does
+    not fail there -- it blocks forever, which hangs the whole logon start. Ask
+    the console a question only it can answer: WindowWidth throws when there is
+    no console to ask.
+  #>
+  if (-not [Environment]::UserInteractive) { return $false }
+  try { [void][Console]::WindowWidth } catch { return $false }
+  return $true
 }
 
 function Stop-LegacyOwners([string]$ServiceName, [bool]$Force) {
@@ -1082,6 +1147,10 @@ function Stop-LegacyOwners([string]$ServiceName, [bool]$Force) {
 
     if (-not $Force) {
       Write-Host "WARNING: $($OwnerPids[$OwnerPid]) occupied by $($OwnerProcess.ProcessName) (pid=$OwnerPid)"
+      if (-not (Test-InteractiveConsole)) {
+        Write-Host "leaving it alone (no console to confirm; pass -Force to replace it)"
+        continue
+      }
       if ((Read-Host 'Kill it? [y/N]') -ne 'y') { continue }
     }
 
@@ -1514,17 +1583,171 @@ function Show-WatchdogStatus {
   else { Write-Host 'watchdog not running (stale PID file)' }
 }
 
-function Install-StartupTask([string]$ModuleManifestPath, [string]$StateRoot, [string]$ConfigPath) {
-  $ConfigArg = if ($ConfigPath) { " -Config $(ConvertTo-PwshLiteral $ConfigPath)" } else { '' }
-  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $StateRoot); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleManifestPath) -Force; pp2 start all$ConfigArg }"
-  $ActionDef = New-ScheduledTaskAction -Execute (Get-PwshPath) -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$Command`""
-  $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-  $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
-  Register-ScheduledTask -TaskName $TaskName -Action $ActionDef -Trigger $Trigger -Principal $Principal -Force | Out-Null
+function Get-StartupServiceNames {
+  <#
+  .SYNOPSIS
+    Normalize the service list a startup task should start.
+
+  .DESCRIPTION
+    An empty list means every service, which is what the CLI default ('all')
+    supplies. The result is sorted so that registering the same set in a
+    different order reuses the same task instead of creating a second one.
+  #>
+  param([string[]]$Name = @('all'))
+
+  return @($Name |
+    ForEach-Object { "$_" -split ',' } |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -and $_ -ne 'all' } |
+    Sort-Object -Unique)
+}
+
+function Get-StartupTaskBaseName {
+  # Set by Initialize-Pp2Context on every pp2 invocation. The fallback keeps
+  # the pure naming helpers usable on their own (unit tests, helper scripts
+  # that dot-source this file without going through the CLI), and covers the
+  # watchdog's ThreadJob runspaces, which copy a hand-picked set of variables.
+  $Value = Get-Variable -Scope Script -Name StartupTaskBaseName -ValueOnly -ErrorAction SilentlyContinue
+  if ($Value) { return $Value }
+  return 'pp2 Startup'
+}
+
+function Get-StartupTaskName {
+  param([string[]]$Name = @('all'))
+
+  $BaseName = Get-StartupTaskBaseName
+  $Requested = @(Get-StartupServiceNames $Name)
+  if ($Requested.Count -eq 0) { return $BaseName }
+  return "$BaseName ($($Requested -join ','))"
+}
+
+function New-StartupTaskAction {
+  <#
+  .SYNOPSIS
+    Build the logon action that runs pp2 for the requested services.
+
+  .DESCRIPTION
+    The module is imported by name rather than by manifest path so the task
+    keeps working after pp2 is upgraded to a new version directory. That only
+    holds when the current module sits on PSModulePath, which Install-StartupTask
+    checks before registering anything.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$ModuleName,
+    [Parameter(Mandatory)][string]$StateRoot,
+    [string[]]$Name = @('all'),
+    [string]$ConfigPath
+  )
+
+  $Requested = @(Get-StartupServiceNames $Name)
+  if ($Requested.Count -eq 0) {
+    $StartTarget = 'all'
+  }
+  else {
+    $StartTarget = '@(' + (($Requested | ForEach-Object { ConvertTo-PwshLiteral $_ }) -join ', ') + ')'
+  }
+
+  # Only pass -Config when it differs from the default file under PP2_HOME;
+  # otherwise the task is tied to whatever path this shell happened to use.
+  $DefaultConfig = Join-Path $StateRoot 'services.json'
+  $UsesDefaultConfig = $ConfigPath -and $ConfigPath.TrimEnd('\', '/').Equals(
+    $DefaultConfig.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
+  $ConfigArg = if ($ConfigPath -and -not $UsesDefaultConfig) { " -Config $(ConvertTo-PwshLiteral $ConfigPath)" } else { '' }
+
+  $Command = "& { `$env:PP2_HOME = $(ConvertTo-PwshLiteral $StateRoot); Import-Module -Name $(ConvertTo-PwshLiteral $ModuleName) -Force; pp2 start $StartTarget$ConfigArg }"
+  return New-ScheduledTaskAction -Execute (Get-PwshPath) `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$Command`""
+}
+
+function Assert-ModuleOnPSModulePath {
+  <#
+  .SYNOPSIS
+    Refuse to register a task that would import a different pp2 copy.
+
+  .DESCRIPTION
+    The startup task imports pp2 by name. When the current session loaded the
+    module straight from a source tree, that name resolves to whatever
+    installed copy exists -- or to nothing -- so the task would silently run
+    something else. Fail here, where the user can still act on it.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$ModuleRoot,
+    [Parameter(Mandatory)][string]$ModuleName
+  )
+
+  # PowerShell only looks at <entry>/<name>/<version>/<name>.psd1, so walking
+  # up to find a PSModulePath entry would accept a source tree nested anywhere
+  # beneath one. Ask PowerShell itself what that name resolves to.
+  $Resolved = [IO.Path]::GetFullPath($ModuleRoot).TrimEnd('\', '/')
+  $Candidates = @(Get-Module -ListAvailable -Name $ModuleName -ErrorAction SilentlyContinue)
+  foreach ($Candidate in $Candidates) {
+    $Base = [IO.Path]::GetFullPath($Candidate.ModuleBase).TrimEnd('\', '/')
+    if ($Base.Equals($Resolved, [StringComparison]::OrdinalIgnoreCase)) { return }
+  }
+
+  throw "pp2 is loaded from '$ModuleRoot', which is not the copy Import-Module resolves on its own. Install pp2 (Install-PSResource pp2) and register startup from that copy, so the task loads the same module."
+}
+
+function Install-StartupTask([string]$ModuleManifestPath, [string]$StateRoot, [string]$ConfigPath, [string[]]$Name = @('all')) {
+  $ModuleName = [IO.Path]::GetFileNameWithoutExtension($ModuleManifestPath)
+  Assert-ModuleOnPSModulePath -ModuleRoot (Split-Path -Parent $ModuleManifestPath) -ModuleName $ModuleName
+
+  $TaskName = Get-StartupTaskName $Name
+  $ActionDef = New-StartupTaskAction -ModuleName $ModuleName -StateRoot $StateRoot -Name $Name -ConfigPath $ConfigPath
+  $Account = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $Account
+  # Limited, not Highest: registering a Highest task needs an elevated shell
+  # and most services do not need one. A service whose definition sets
+  # 'elevated' is raised by pp2 itself when it launches.
+  $Principal = New-ScheduledTaskPrincipal -UserId $Account -LogonType Interactive -RunLevel Limited
+  # A logon starter has no natural end time, and a missed trigger (the machine
+  # was asleep, or the scheduler was busy) should still run. The defaults are
+  # a 72-hour limit and no catch-up.
+  $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+  try {
+    Register-ScheduledTask -TaskName $TaskName -TaskPath '\' -Action $ActionDef -Trigger $Trigger `
+      -Principal $Principal -Settings $Settings -Force -ErrorAction Stop | Out-Null
+  }
+  catch {
+    throw "Failed to register startup task '$TaskName': $($_.Exception.Message)"
+  }
+
+  # Register-ScheduledTask can report success without the task existing (a
+  # non-elevated Highest task used to); verify instead of trusting the call.
+  if (-not (Get-ScheduledTask -TaskName $TaskName -TaskPath '\' -ErrorAction SilentlyContinue)) {
+    throw "Startup task '$TaskName' was not created."
+  }
+
   Write-Host "installed startup task: $TaskName"
 }
 
-function Uninstall-StartupTask {
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-  Write-Host "uninstalled startup task: $TaskName"
+function Uninstall-StartupTask([string[]]$Name = @('all')) {
+  $Requested = @(Get-StartupServiceNames $Name)
+
+  if ($Requested.Count -gt 0) {
+    $TaskName = Get-StartupTaskName $Requested
+    if (-not (Get-ScheduledTask -TaskName $TaskName -TaskPath '\' -ErrorAction SilentlyContinue)) {
+      Write-Host "startup task not installed: $TaskName"
+      return
+    }
+    Unregister-ScheduledTask -TaskName $TaskName -TaskPath '\' -Confirm:$false -ErrorAction Stop
+    Write-Host "uninstalled startup task: $TaskName"
+    return
+  }
+
+  $Prefix = Get-StartupTaskBaseName
+  $Tasks = @(Get-ScheduledTask -TaskName "$Prefix*" -TaskPath '\' -ErrorAction SilentlyContinue |
+    Where-Object { $_.TaskName -eq $Prefix -or $_.TaskName -like "$Prefix (*)" })
+
+  if ($Tasks.Count -eq 0) {
+    Write-Host 'no startup tasks installed'
+    return
+  }
+
+  foreach ($Task in $Tasks) {
+    Unregister-ScheduledTask -TaskName $Task.TaskName -TaskPath '\' -Confirm:$false -ErrorAction Stop
+    Write-Host "uninstalled startup task: $($Task.TaskName)"
+  }
 }

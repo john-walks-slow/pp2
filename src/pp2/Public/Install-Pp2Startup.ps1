@@ -1,3 +1,6 @@
 function Install-Pp2Startup {
-    pp2 startup-install
+    param(
+        [string[]]$Name = @('all')
+    )
+    pp2 startup-install -Name $Name
 }

@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-08
+
+### Added
+
+- `pp2 startup-install [name]` starts only the named services at logon
+  (`pp2 startup-install dsh`); the task is named `pp2 Startup (dsh)`, so
+  several subsets can coexist. An unknown or disabled service is rejected at
+  registration rather than at the next logon. `pp2 startup-uninstall [name]`
+  removes one such task, or all `pp2 Startup*` tasks when no name is given.
+- `skills/pp2/SKILL.md`: an agent skill describing when and how to drive pp2.
+
+### Fixed
+
+- `pp2 startup-install` failed silently in a non-elevated shell. It registered
+  the task with `-RunLevel Highest`, which needs an elevated session; the
+  access-denied error was swallowed and the command still printed
+  `installed startup task`. The task is now `Limited` and the registration is
+  verified, so a failure is reported. Services that set `elevated` are still
+  raised by pp2 itself at launch.
+- The logon task imports pp2 by name instead of by the manifest path of the
+  version that registered it, so it keeps working after pp2 is upgraded.
+  Registering from a source-tree import is refused with an actionable message.
+
+### Changed
+
+- The task no longer stops when the laptop switches to battery power, no
+  longer carries the default 72-hour execution limit, and runs when a logon
+  trigger was missed.
+- The watchdog now watches the services it was started for, recorded in
+  `run/watchdog.services`, instead of every `autoRestart` service in the
+  config. A PID file left over from a previous session could make the watchdog
+  revive a service nobody asked to start — which defeated starting one service
+  from the logon task. Stopping a service also removes it from the watched set.
+- A confirmation prompt that needs a console is skipped instead of asked when
+  there is none. A hidden scheduled task has no console, and `Read-Host` blocks
+  forever there rather than failing, so a port already in use could hang the
+  whole logon start.
+
 ## [1.1.0] - 2026-10-17
 
 ### Added

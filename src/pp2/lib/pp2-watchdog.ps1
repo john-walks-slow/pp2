@@ -80,7 +80,11 @@ Write-WatchdogLog "watchdog started pid=$PID interval=$Interval"
 while ($true) {
   Start-Sleep -Seconds $Interval
 
-  foreach ($ServiceName in $Config.services.PSObject.Properties.Name) {
+  # Only services pp2 explicitly handed to this watchdog. Watching every
+  # autoRestart service meant a PID file left over from before a reboot made
+  # the watchdog revive services the user never asked to start.
+  foreach ($ServiceName in (Get-WatchedServices)) {
+    if (-not $Config.services.PSObject.Properties[$ServiceName]) { continue }
     $Service = Get-ServiceConfig $ServiceName
     
     # Skip disabled services
