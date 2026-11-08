@@ -8,8 +8,8 @@
 
 **pp2 = PowerShell × pm2**
 
-> **当前状态**：[PowerShell Gallery](https://www.powershellgallery.com/packages/pp2)
-> 上最新为 v1.1.0；源码树为 v1.2.0，尚未发布到 Gallery。
+> **当前状态**：v1.2.0 已发布到
+> [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2)。
 > 直接用 `Install-Module pp2` 安装，需要 PowerShell 7+。
 
 ## 安装
@@ -409,6 +409,7 @@ PID 跟踪在配置目录下的 `run/` 子目录：
 
 | 版本  | 渠道                                                          |
 | ----- | ------------------------------------------------------------- |
+| 1.2.0 | [PSGallery](https://www.powershellgallery.com/packages/pp2)    |
 | 1.1.0 | [PSGallery](https://www.powershellgallery.com/packages/pp2)    |
 | 1.0.2 | [PSGallery](https://www.powershellgallery.com/packages/pp2)    |
 | 1.0.1 | [PSGallery](https://www.powershellgallery.com/packages/pp2)    |

@@ -8,9 +8,8 @@ PowerShell-based service manager for managing background processes with dependen
 
 **pp2 = PowerShell × pm2**
 
-> **Status:** v1.1.0 is the latest release on the
-> [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2); the
-> source tree is v1.2.0 and is not on the Gallery yet.
+> **Status:** v1.2.0 published to the
+> [PowerShell Gallery](https://www.powershellgallery.com/packages/pp2).
 > Install with `Install-Module pp2`. Requires PowerShell 7+.
 
 ## Installation
@@ -454,6 +453,7 @@ Version history lives in [CHANGELOG.md](CHANGELOG.md). Published versions:
 
 | Version | Where                                                        |
 | ------- | ------------------------------------------------------------ |
+| 1.2.0   | [PSGallery](https://www.powershellgallery.com/packages/pp2)   |
 | 1.1.0   | [PSGallery](https://www.powershellgallery.com/packages/pp2)   |
 | 1.0.2   | [PSGallery](https://www.powershellgallery.com/packages/pp2)   |
 | 1.0.1   | [PSGallery](https://www.powershellgallery.com/packages/pp2)   |
